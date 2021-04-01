@@ -44,7 +44,7 @@ Now you should be good to go!
 
 # Use
 
-An example of performing energy + force learning on an Aspirin trajectory can be found in `tests/`
+An example of performing energy + force learning on an MD9 trajectory data can be found in `tests/train_md9_forces.py`
 
 First, download the MD9 dataset by typing the following command in the `tests/` folder
 
