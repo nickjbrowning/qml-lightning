@@ -10,7 +10,7 @@ Structured Orthogonal Random Features via Fast Hadamard Transforms
 ### Representations
 Elemental Gaussian-Type Orbital Atomic Density
 
-#Requirements
+# Requirements
 
 ```
 pytorch
@@ -18,7 +18,7 @@ numpy
 scipy
 ```
 
-#Installation
+# Installation
 
 cd to the directory containing setup.py and type
 
@@ -42,5 +42,5 @@ export PYTHONPATH=/home/nick/git/QMLightning/build:$PYHTONPATH
 
 Now you should be good to go!
 
-#Use
+# Use
 
