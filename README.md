@@ -56,14 +56,14 @@ make get-data
 now run the following command to do some ML,
 
 ```
-python3 train_md9_forces.py -ntrain 1000 -ntest 500 -nbatch 4 -sigma 16.0 -llambda 1e-10
+python3 train_md9_forces.py -ntrain 1000 -ntest 500 -nbatch 4 -sigma 16.0 -llambda 1e-11
 ```
 
 nbatch specifies how many times to split the training set. The code then loops over these spits to construct the Z^T Z Gramm matrix iteratively.
 
 sigma corresponds to the "width" of the kernel the SORF method is approximating. Values are problem-specific but somewhere between 8.0 and 32.0 should be ok.
 
-lambda is the level of regularization. Recommend values between 1e-8 and 1e-11 should be ok.
+lambda is the level of regularization. Recommend values between 1e-8 and 1e-12 should be ok.
 
 Parameters for the test script:
 
@@ -74,7 +74,7 @@ nbatch, split train configurations into nbatch segments for memory purposes, def
 data, path to npz data file, default = data/aspirin_dft.npz
 
 sigma, kernel width, default = 20.0
-llambda, regularization parameter, default = 1e-10
+llambda, regularization parameter, default = 1e-11
 npcas, number of singular vectors to use for the representation projection, default = 128
 ntransforms, number of hadamard [HD]_n blocks, default = 1
 nfeatures, number of random features for integral estimation, default = 8192

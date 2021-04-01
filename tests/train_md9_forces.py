@@ -17,7 +17,7 @@ if __name__ == "__main__":
     
     '''model parameters'''
     parser.add_argument("-sigma", type=float, default=20.0)
-    parser.add_argument("-llambda", type=float, default=1e-10)
+    parser.add_argument("-llambda", type=float, default=1e-11)
     parser.add_argument("-npcas", type=int, default=128)
     parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nfeatures", type=int, default=8192)
