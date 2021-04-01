@@ -59,7 +59,7 @@ now run the following command to do some ML,
 python3 train_md9_forces.py -ntrain 1000 -ntest 500 -nbatch 4 -sigma 16.0 -llambda 1e-10
 ```
 
-nbatch specifies how many times to split the training and test sets. The code then loops over these spits to construct the Z^T Z Gramm matrix iteratively.
+nbatch specifies how many times to split the training set. The code then loops over these spits to construct the Z^T Z Gramm matrix iteratively.
 
 sigma corresponds to the "width" of the kernel the SORF method is approximating. Values are problem-specific but somewhere between 8.0 and 32.0 should be ok.
 
