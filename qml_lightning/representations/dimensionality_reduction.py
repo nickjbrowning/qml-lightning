@@ -39,29 +39,33 @@ def get_reductors(X, charges, npcas, elements):
         print (f"{size_from} -> {size_to}  Cumulative Explained Feature Variance = {cev:6.2f} %%")
         
         reductors[e] = reductor
+    
+    return reductors
 
-    def project_representation(X, reductor):
-        
-        '''
-        
-        projects the representation from shape: 
-        nsamples x repsize 
-        to 
-        nsamples x npcas
-        
-        '''
-        
-        return torch.matmul(X, reductor)
+
+def project_representation(X, reductor):
     
-    def project_derivative(dX, reductor):
-        '''
-        
-        projects the representation derivative from shape:
-        
-        nsamples x natoms x 3 x repsize 
-        to 
-        nsamples x natoms x 3 x npcas
-        
-        '''
+    '''
     
-        return torch.einsum('jmnk, kl->jmnl', dX, reductor)
+    projects the representation from shape: 
+    nsamples x repsize 
+    to 
+    nsamples x npcas
+    
+    '''
+    
+    return torch.matmul(X, reductor)
+
+
+def project_derivative(dX, reductor):
+    '''
+    
+    projects the representation derivative from shape:
+    
+    nsamples x natoms x 3 x repsize 
+    to 
+    nsamples x natoms x 3 x npcas
+    
+    '''
+
+    return torch.einsum('jmnk, kl->jmnl', dX, reductor)
