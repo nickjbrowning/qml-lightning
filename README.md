@@ -1,4 +1,4 @@
-# QML-Lightning
+# QML-Lightning - Do Not Share Publically!
 
 GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning.
 
