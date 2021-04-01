@@ -55,7 +55,7 @@ make get-data
 now run the following command to do some ML,
 
 ```
-python3 aspirin.py -ntrain 1000 -ntest 500 -nbatch 4 -sigma 16.0 -lambda 1e-10
+python3 train_md9_forces.py -ntrain 1000 -ntest 500 -nbatch 4 -sigma 16.0 -llambda 1e-10
 ```
 
 nbatch specifies how many times to split the training and test sets. The code then loops over these spits to construct the Z^T Z Gramm matrix iteratively.
