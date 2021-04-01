@@ -2,8 +2,8 @@ import torch
 import numpy as np
 
 from qml_lightning.representations.EGTO import get_elemental_gto
-from qml_lightning.features.SORF import *
-from qml_lightning.representations.dimensionality_reduction import *
+from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, get_SORF_coefficients, get_features, get_feature_derivatives
+from qml_lightning.representations.dimensionality_reduction import get_reductors, project_representation, project_derivative
 import argparse
 
 if __name__ == "__main__":
@@ -162,6 +162,8 @@ if __name__ == "__main__":
     
     alpha = torch.solve(Y[:, None], ZTZ).solution
     
+    del ZTZ, ZtrainY, GtrainY, Ztrain, Gtrain_derivative
+    
     end.record()
     torch.cuda.synchronize()
 
@@ -170,7 +172,7 @@ if __name__ == "__main__":
     print("coefficients time: ", start.elapsed_time(end), "ms")
     
     start.record()
-    gto_test, gto_test_grad = get_elemental_gto(test_coordinates, test_charges, species, ngaussians, eta, lmax, rcut, gradients=True)
+    gto_test, gto_test_grad = get_elemental_gto(test_coordinates, test_charges, species, ngaussians, eta, lmax, rcut, gradients=True, print_timings=True)
     
     E = torch.zeros(ntest, device=device, dtype=torch.float32)
     F = torch.zeros(ntest * natoms * 3, device=device, dtype=torch.float32)
