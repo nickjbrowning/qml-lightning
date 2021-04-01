@@ -16,6 +16,7 @@ Elemental Gaussian-Type Orbital Atomic Density
 pytorch
 numpy
 scipy
+cuda C compilers, e.g https://developer.nvidia.com/hpc-sdk
 ```
 
 # Installation
