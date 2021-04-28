@@ -293,7 +293,7 @@ if __name__ == "__main__":
             
             coeffs = get_SORF_coefficients(sub, nfeatures, Dmat[e], coeff_normalisation)
             
-            # Ztest = get_features(coeffs, bk[e], batch_indexes, ntest)
+            Ztest = get_features(coeffs, bk[e], batch_indexes, ntest)
             
             Gtest = -get_feature_derivatives(coeffs, bk[e], Dmat[e], sub_grad, batch_indexes, ntest, coeff_normalisation)
 

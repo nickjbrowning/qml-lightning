@@ -194,8 +194,9 @@ if __name__ == "__main__":
     bk = get_bias(species, nfeatures)
     
     ZTZ = torch.zeros(nfeatures, nfeatures, device=device, dtype=torch.float64)
-    ZtrainY = torch.zeros(nfeatures, device=device, dtype=torch.float64)
-    GtrainY = torch.zeros(nfeatures, device=device, dtype=torch.float64)
+
+    ZtrainY = torch.zeros(nfeatures, 1, device=device, dtype=torch.float64)
+    GtrainY = torch.zeros(nfeatures, 1, device=device, dtype=torch.float64)
     
     print ("--- Computing Gramm Matrix ---")
     
@@ -215,8 +216,8 @@ if __name__ == "__main__":
             
             train_gto, train_gto_derivative = get_elemental_gto(batch_train_coordinates, batch_train_charges, torch.from_numpy(species).cuda().float(), ngaussians, eta, lmax, rcut, gradients=True)
             
-            Ztrain = torch.zeros(zbatch, nfeatures, device=device, dtype=torch.float32)
-            Gtrain_derivative = torch.zeros(zbatch, natoms, 3, nfeatures, device=device, dtype=torch.float32)
+            Ztrain = torch.zeros(zbatch, nfeatures, device=device, dtype=torch.float64)
+            Gtrain_derivative = torch.zeros(zbatch, natoms, 3, nfeatures, device=device, dtype=torch.float64)
             
             for e in species:
                 
@@ -235,21 +236,22 @@ if __name__ == "__main__":
                 
                 coeffs = get_SORF_coefficients(sub, nfeatures, Dmat[e], coeff_normalisation)
             
-                Ztrain += get_features(coeffs, bk[e], batch_indexes, zbatch)
+                Ztrain += get_features(coeffs, bk[e], batch_indexes, zbatch).double()
                 
-                Gtrain_derivative -= get_feature_derivatives(coeffs, bk[e], Dmat[e], sub_grad, batch_indexes, zbatch, coeff_normalisation)
-                
-            ZtrainY += torch.matmul(Ztrain.double().T, batch_energies.double())
-            GtrainY += torch.matmul(Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures).double().T, batch_forces.double().flatten())
+                Gtrain_derivative -= get_feature_derivatives(coeffs, bk[e], Dmat[e], sub_grad, batch_indexes, zbatch, coeff_normalisation).double()
             
-            ZTZ += torch.matmul(Ztrain.double().T, Ztrain.double()) + torch.matmul(Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures).double().T,
-                                                             Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures).double())
+            Gtrain_derivative = Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures)
+            
+            ZtrainY += torch.matmul(Ztrain.T, batch_energies[:, None].double())
+            GtrainY += torch.matmul(Gtrain_derivative.T, batch_forces.double().flatten()[:, None])
+            
+            ZTZ += torch.matmul(Ztrain.T, Ztrain) + torch.matmul(Gtrain_derivative.T, Gtrain_derivative)
             
     ZTZ[torch.eye(nfeatures).bool()] += llambda
     
     Y = ZtrainY + GtrainY
     
-    alpha = torch.solve(Y[:, None], ZTZ).solution
+    alpha = torch.solve(Y, ZTZ).solution
     alpha = alpha[:, 0]
     
     del train_charges, train_coordinates, train_energies, train_forces
@@ -270,7 +272,7 @@ if __name__ == "__main__":
         
         rep = fingerprint.forward(coordinates, charges.int())
 
-        Ztest = torch.zeros(ntest, nfeatures, device=device, dtype=torch.float32)
+        Ztest = torch.zeros(ntest, nfeatures, device=device, dtype=torch.float64)
         
         for e in species:
   
@@ -289,9 +291,12 @@ if __name__ == "__main__":
             coeffs = coeff_normalisation * SORFTransformCuda.apply(Dmat[e] * sub)
             coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
             
-            Ztest.index_add_(0, batch_indexes, feature_normalisation * torch.cos(coeffs + bk[e]))
+            Ztest.index_add_(0, batch_indexes, feature_normalisation * torch.cos(coeffs + bk[e]).double())
 
-        energies_predict = torch.matmul(Ztest.double(), alpha)
+        energies_predict = torch.matmul(Ztest, alpha)
+        
+        print (energies_predict)
+        print (energies)
         
         forces_predict, = torch.autograd.grad(-energies_predict.sum(), coordinates, retain_graph=True)
         

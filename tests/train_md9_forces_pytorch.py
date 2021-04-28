@@ -190,13 +190,7 @@ if __name__ == "__main__":
     print("coefficients time: ", start.elapsed_time(end), "ms")
     
     start.record()
-    gto_test, gto_test_grad = get_elemental_gto(test_coordinates, test_charges, species, ngaussians, eta, lmax, rcut, gradients=True, print_timings=True)
-    
-    E = torch.zeros(ntest, device=device, dtype=torch.float64)
-    F = torch.zeros(ntest * natoms * 3, device=device, dtype=torch.float64)
-    
-    E2 = torch.zeros(ntest, device=device, dtype=torch.float64)
-    
+
     alpha = alpha[:, 0]
     
     alpha.cpu().numpy().tofile("alpha.npy")
@@ -213,7 +207,7 @@ if __name__ == "__main__":
         
     rep = fingerprint.forward(test_coordinates, test_charges.int())
     
-    Ztest2 = torch.zeros(ntest, nfeatures, device=device, dtype=torch.float32)
+    Ztest = torch.zeros(ntest, nfeatures, device=device, dtype=torch.float64)
     
     nstacks = int(float(nfeatures) / npcas)
     
@@ -221,70 +215,32 @@ if __name__ == "__main__":
     feature_normalisation = np.sqrt(2.0 / float(nfeatures))
     
     for e in elements:
-        
-        startg.record()
+  
         indexes = test_charges == e
         batch_indexes = torch.where(indexes)[0].type(torch.int)
-        sub = gto_test[indexes]
-        sub_grad = gto_test_grad[indexes]
-        endg.record()
-        torch.cuda.synchronize()
-        # print("indexing time:", startg.elapsed_time(endg), "ms")
-        
-        startg.record()
-        sub = project_representation(sub, reductors[e])
-        sub_grad = project_derivative(sub_grad, reductors[e])
-        endg.record()
-        torch.cuda.synchronize()
-        # print("projection time:", startg.elapsed_time(endg), "ms")
-        
-        startg.record()
-        coeffs = get_SORF_coefficients(sub, nfeatures, Dmat[e], coeff_normalisation, print_timings=True)
-        endg.record()
-        torch.cuda.synchronize()
-        
-        # print("coeffs time:", startg.elapsed_time(endg), "ms")
-        
-        Ztest = get_features(coeffs, bk[e], batch_indexes, ntest, print_timings=True)
-        
-        startg.record()
-        Gtest = -get_feature_derivatives(coeffs, bk[e], Dmat[e], sub_grad, batch_indexes, ntest, coeff_normalisation, print_timings=True)
-        endg.record()
-        torch.cuda.synchronize()
-        # print("Gtest time:", startg.elapsed_time(endg), "ms")
-        
-        startg.record()
-        F += torch.matmul(Gtest.double(), alpha).flatten()
-        E += torch.matmul(Ztest.double(), alpha)
-        endg.record()
-        torch.cuda.synchronize()
-        # print("matmul time:", startg.elapsed_time(endg), "ms")
         
         sub = rep[indexes]
+        
+        if (sub.shape[0] == 0):
+            continue
+        
         sub = project_representation(sub, reductors[e])
         
         sub = sub.repeat(1, nstacks).reshape(sub.shape[0], nstacks, npcas)
-            
-        coeffs2 = coeff_normalisation * SORFTransformCuda.apply(Dmat[e] * sub)
         
-        coeffs2 = coeffs.reshape(coeffs2.shape[0], coeffs2.shape[1] * coeffs2.shape[2])
+        coeffs = coeff_normalisation * SORFTransformCuda.apply(Dmat[e] * sub)
+        coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
+        
+        Ztest.index_add_(0, batch_indexes, feature_normalisation * torch.cos(coeffs + bk[e]).double())
 
-        torch_features = feature_normalisation * torch.cos(coeffs2 + bk[e])
-        
-        Ztest2.index_add_(0, batch_indexes, torch_features)
-    
-    energies_predict = torch.matmul(Ztest2.double(), alpha)
+    energies_predict = torch.matmul(Ztest, alpha)
     
     end.record()
     torch.cuda.synchronize()
     
     print("prediction for", ntest, "molecules time: ", start.elapsed_time(end), "ms")
     
-    print("Energy MAE:", torch.mean(torch.abs(E - test_energies)))
-    
-    print("Force MAE:", torch.mean(torch.abs(F - test_forces.flatten())))
-    
-    forces_predict, _ = torch.autograd.grad(-energies_predict.sum(), test_coordinates, retain_graph=True, create_graph=True)
+    forces_predict, = torch.autograd.grad(-energies_predict.sum(), test_coordinates, retain_graph=True)
     
     print("Energy MAE TORCH:", torch.mean(torch.abs(energies_predict - test_energies)))
-    print("Force MAE TORCH:", torch.mean(torch.abs(forces_predict - forces.flatten())))
+    print("Force MAE TORCH:", torch.mean(torch.abs(forces_predict.flatten() - test_forces.flatten())))
