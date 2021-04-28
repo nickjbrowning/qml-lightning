@@ -2,6 +2,10 @@
 Created on 1 Apr 2021
 
 @author: Nicholas J. Browning
+@contact: nickjbrowning@gmail.com
+
+@copyright: 
+
 '''
 
 import torch
@@ -24,7 +28,7 @@ def get_reductors(X, charges, npcas, elements):
         sub = X[indexes]
         
         perm = torch.randperm(sub.size(0))
-        idx = perm[:500]
+        idx = perm[:512]
 
         choice_input = sub[idx]
 

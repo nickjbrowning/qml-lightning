@@ -2,11 +2,35 @@
 Created on 1 Apr 2021
 
 @author: Nicholas J. Browning
+@contact: nickjbrowning@gmail.com
+
+@copyright: 
+
 '''
+
 import numpy as np
 from qml_lightning.cuda import sorf_gpu
 import torch
 
+
+class SORFTransformCuda(torch.autograd.Function):
+    ''' 
+        Wrapper for forward/backward hadamard transforms for pytorch autograd support.
+        
+    '''
+    
+    @staticmethod
+    def forward(ctx, u):
+        
+        return sorf_gpu.hadamard_transform_gpu(u)
+
+    @staticmethod
+    def backward(ctx, grad):
+
+        grads = sorf_gpu.hadamard_transform_gpu(grad)
+        
+        return grads
+        
 
 def get_SORF_diagonals(elements, ntransforms, nfeatures, npcas):
     
@@ -38,6 +62,7 @@ def get_SORF_coefficients(input_rep, nfeatures, diagonals, normalization, print_
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     
+    start.record()
     coeffs = normalization * sorf_gpu.sorf_matrix_gpu(input_rep, diagonals, nfeatures)
     
     end.record()
@@ -54,8 +79,8 @@ def get_features(coeffs, bias, batch_indexes, batch_num, print_timings=False):
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     
+    start.record()
     features = sorf_gpu.molecular_featurisation_gpu(coeffs, bias, batch_indexes, batch_num)
-    
     end.record()
     torch.cuda.synchronize()
     
@@ -70,8 +95,8 @@ def get_feature_derivatives(coeffs, bias, diagonals, input_grad, batch_indexes, 
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     
+    start.record()
     feature_derivs = normalization * sorf_gpu.molecular_featurisation_derivative_gpu(coeffs, bias, diagonals, input_grad, batch_indexes, batch_num)
-    
     end.record()
     torch.cuda.synchronize()
     

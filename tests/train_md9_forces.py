@@ -2,8 +2,9 @@ import torch
 import numpy as np
 
 from qml_lightning.representations.EGTO import get_elemental_gto
-from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, get_SORF_coefficients, get_features, get_feature_derivatives
+from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, get_SORF_coefficients, get_features, get_feature_derivatives, SORFTransformCuda
 from qml_lightning.representations.dimensionality_reduction import get_reductors, project_representation, project_derivative
+from qml_lightning.representations.EGTO import ElementalGTO
 import argparse
 
 if __name__ == "__main__":
@@ -11,7 +12,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument("-ntrain", type=int, default=1000)
-    parser.add_argument("-ntest", type=int, default=500)
+    parser.add_argument("-ntest", type=int, default=250)
     parser.add_argument("-nbatch", type=int, default=4)
     parser.add_argument("-data", type=str, default='data/aspirin_dft.npz')
     
@@ -79,17 +80,26 @@ if __name__ == "__main__":
     
     train_indexes = ALL_IDX[:ntrain]
     test_indexes = ALL_IDX[ntrain:ntrain + ntest]
-   
+    
+    self_energy = torch.Tensor([0., -0.500273, 0., 0., 0., 0., -37.845355, -54.583861, -75.064579, -99.718730]).cuda()
+    hartree2kcalmol = 627.5095
+    
     train_coordinates = torch.from_numpy(coords[train_indexes]).float().cuda()
     train_charges = torch.from_numpy(nuclear_charges[train_indexes]).float().cuda()
     train_energies = torch.from_numpy(energies[train_indexes]).float().cuda()
     train_forces = torch.from_numpy(forces[train_indexes]).float().cuda()
     
+    self_interaction = self_energy[train_charges.long()].sum(axis=1) * hartree2kcalmol
+    train_energies = train_energies - self_interaction
+    
     test_coordinates = torch.from_numpy(coords[test_indexes]).float().cuda()
     test_charges = torch.from_numpy(nuclear_charges[test_indexes]).float().cuda()
-    test_energies = torch.from_numpy(energies[test_indexes]).float().cuda()
-    test_forces = torch.from_numpy(forces[test_indexes]).float().cuda()
+    test_energies = torch.from_numpy(energies[test_indexes]).cuda()
+    test_forces = torch.from_numpy(forces[test_indexes]).cuda()
     
+    self_interaction = self_energy[test_charges.long()].sum(axis=1) * hartree2kcalmol
+    test_energies = test_energies - self_interaction
+        
     species = torch.from_numpy(elements).type(torch.float32).cuda()
 
     start = torch.cuda.Event(enable_timing=True)
@@ -152,7 +162,7 @@ if __name__ == "__main__":
     end.record()
     torch.cuda.synchronize()
     print ("---Gramm Matrix---")
-    print (ZTZ)
+
     print("batched ZTZ time: ", start.elapsed_time(end), "ms")
     
     ZTZ[torch.eye(nfeatures).bool()] += llambda
@@ -174,37 +184,95 @@ if __name__ == "__main__":
     start.record()
     gto_test, gto_test_grad = get_elemental_gto(test_coordinates, test_charges, species, ngaussians, eta, lmax, rcut, gradients=True, print_timings=True)
     
-    E = torch.zeros(ntest, device=device, dtype=torch.float32)
-    F = torch.zeros(ntest * natoms * 3, device=device, dtype=torch.float32)
+    E = torch.zeros(ntest, device=device, dtype=torch.float64)
+    F = torch.zeros(ntest * natoms * 3, device=device, dtype=torch.float64)
     
-    alpha = alpha[:, 0].float()
+    E2 = torch.zeros(ntest, device=device, dtype=torch.float64)
+    
+    alpha = alpha[:, 0]
+    
+    alpha.cpu().numpy().tofile("alpha.npy")
+    
+    for e in elements:
+        Dmat[e].cpu().numpy().tofile("W_" + str(e) + ".npy")
+        bk[e].cpu().numpy().tofile("b_" + str(e) + ".npy")
+        reductors[e].cpu().numpy().tofile("reductor_" + str(e) + ".npy")
+    
+    startg = torch.cuda.Event(enable_timing=True)
+    endg = torch.cuda.Event(enable_timing=True)
+    
+    fingerprint = ElementalGTO(species=elements, low_cutoff=0.0, high_cutoff=rcut, n_gaussians=ngaussians, eta=eta, Lmax=lmax, device=device)
+        
+    rep = fingerprint.forward(test_coordinates, test_charges.int())
+    
+    Ztest2 = torch.zeros(ntest, nfeatures, device=device, dtype=torch.float32)
+    
+    nstacks = int(float(nfeatures) / npcas)
+    
+    coeff_normalisation = np.sqrt(npcas) / sigma
+    feature_normalisation = np.sqrt(2.0 / float(nfeatures))
     
     for e in elements:
         
+        startg.record()
         indexes = test_charges == e
-
         batch_indexes = torch.where(indexes)[0].type(torch.int)
-    
         sub = gto_test[indexes]
         sub_grad = gto_test_grad[indexes]
-
+        endg.record()
+        torch.cuda.synchronize()
+        # print("indexing time:", startg.elapsed_time(endg), "ms")
+        
+        startg.record()
         sub = project_representation(sub, reductors[e])
         sub_grad = project_derivative(sub_grad, reductors[e])
+        endg.record()
+        torch.cuda.synchronize()
+        # print("projection time:", startg.elapsed_time(endg), "ms")
+        
+        startg.record()
+        coeffs = get_SORF_coefficients(sub, nfeatures, Dmat[e], coeff_normalisation, print_timings=True)
+        endg.record()
+        torch.cuda.synchronize()
+        
+        # print("coeffs time:", startg.elapsed_time(endg), "ms")
+        
+        Ztest = get_features(coeffs, bk[e], batch_indexes, ntest, print_timings=True)
+        
+        startg.record()
+        Gtest = -get_feature_derivatives(coeffs, bk[e], Dmat[e], sub_grad, batch_indexes, ntest, coeff_normalisation, print_timings=True)
+        endg.record()
+        torch.cuda.synchronize()
+        # print("Gtest time:", startg.elapsed_time(endg), "ms")
+        
+        startg.record()
+        F += torch.matmul(Gtest.double(), alpha).flatten()
+        E += torch.matmul(Ztest.double(), alpha)
+        endg.record()
+        torch.cuda.synchronize()
+        # print("matmul time:", startg.elapsed_time(endg), "ms")
+        
+        sub = rep[indexes]
+        sub = project_representation(sub, reductors[e])
+        
+        sub = sub.repeat(1, nstacks).reshape(sub.shape[0], nstacks, npcas)
             
-        coeffs = coeffs = get_SORF_coefficients(sub, nfeatures, Dmat[e], coeff_normalisation)
-    
-        Ztest = get_features(coeffs, bk[e], batch_indexes, ntest)
+        coeffs2 = coeff_normalisation * SORFTransformCuda.apply(Dmat[e] * sub)
         
-        Gtest = -get_feature_derivatives(coeffs, bk[e], Dmat[e], sub_grad, batch_indexes, ntest, coeff_normalisation)
-        
-        F += torch.matmul(Gtest.reshape(ntest * natoms * 3, nfeatures), alpha)
-        E += torch.matmul(Ztest, alpha)
+        coeffs2 = coeffs.reshape(coeffs2.shape[0], coeffs2.shape[1] * coeffs2.shape[2])
 
+        torch_features = feature_normalisation * torch.cos(coeffs2 + bk[e])
+        
+        Ztest2.index_add_(0, batch_indexes, torch_features)
+    
+    energies_predict = torch.matmul(Ztest2.double(), alpha)
+    
     end.record()
     torch.cuda.synchronize()
     
     print("prediction for", ntest, "molecules time: ", start.elapsed_time(end), "ms")
     
     print("Energy MAE:", torch.mean(torch.abs(E - test_energies)))
+    print("Energy MAE TORCH:", torch.mean(torch.abs(energies_predict - test_energies)))
     print("Force MAE:", torch.mean(torch.abs(F - test_forces.flatten())))
     
