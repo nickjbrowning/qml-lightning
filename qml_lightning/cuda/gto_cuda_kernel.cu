@@ -8,7 +8,7 @@ using namespace std;
 
 /*Reasonably efficient implementation - builds the uncontracted GTO basis in shared memory, and then contracts it in a separate
  *shared memory buffer, before saving to global memory. Parallelisation occurs over norbs x gridpoints, rather than natoms, as
- *this has better potential for removing bank conflicts, as well as removing the need for AtomicAdd calls. */
+ *this has better potential for removing bank conflicts. */
 
 //TODO need to make sure access to norb_temporary isn't serialized on shared memory bank access.
 __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
@@ -29,7 +29,7 @@ __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAcces
 	int natoms = coordinates.size(1);
 	int norbs = gto_components.size(0);
 	int nspecies = species.size(0);
-	int nmbody = int(float((nspecies + 1) / 2) * nspecies);
+	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
 
 	int krepsize = nmbody * norbs * ngauss;
 	int lrepsize = nmbody * (lmax + 1) * ngauss;
@@ -86,7 +86,7 @@ __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAcces
 		for (int j = 0; j < nspecies; j++) {
 			for (int k = j; k < nspecies; k++) {
 				smbodylist[j * nspecies + k] = mbodylist[j][k];
-				smbodylist[k * nspecies + j] = smbodylist[j * nspecies + k];
+				smbodylist[k * nspecies + j] = mbodylist[k][j];
 			}
 		}
 	}
@@ -137,7 +137,7 @@ __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAcces
 		for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
 			int z = k % ngauss;
-			int korb = int(floor(float(k / ngauss)));
+			int korb = int(floor(float(k) / ngauss));
 
 			int gto_power = sgto_powers[korb];
 
@@ -146,8 +146,6 @@ __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAcces
 			float gto_component_z = sgto_components_z[korb];
 
 			float ang = powf(rijx, gto_component_x) * powf(rijy, gto_component_y) * powf(rijz, gto_component_z);
-
-			//float val = sqrtf(eta / M_PI) * (1.0 / rij) * ang * cut;
 
 			float val = sqrtf(eta / M_PI) * (1.0 / powf(rij, 2.0 + gto_power)) * ang * cut;
 
@@ -173,7 +171,7 @@ __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAcces
 	for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
 		int z = k % ngauss;
-		int korb = int(floor(float(k / ngauss)));
+		int korb = int(floor(float(k) / ngauss));
 
 		int lchannel = sgto_powers[korb];
 
@@ -198,7 +196,7 @@ __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAcces
 	for (int k = threadIdx.x; k < (lmax + 1) * ngauss; k += blockDim.x) {
 
 		int z = k % ngauss;
-		int l = int(floor(float(k / ngauss)));
+		int l = int(floor(float(k) / ngauss));
 
 		for (int m = 0; m < nspecies; m++) {
 			for (int n = m + 1; n < nspecies; n++) {
@@ -214,7 +212,8 @@ __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAcces
 				float t1 = lmax_temporary[lmm];
 				float t2 = lmax_temporary[lnn];
 
-				lmax_temporary[lmn] -= (t1 + t2);
+				atomicAdd(&lmax_temporary[lmn], -(t1 + t2));
+				//lmax_temporary[lmn] -= (t1 + t2);
 			}
 		}
 	}
@@ -245,7 +244,7 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 	int natoms = coordinates.size(1);
 	int norbs = gto_components.size(0);
 	int nspecies = species.size(0);
-	int nmbody = int(float((nspecies + 1) / 2) * nspecies);
+	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
 
 	int krepsize = nmbody * norbs * ngauss;
 	int lrepsize = nmbody * (lmax + 1) * ngauss;
@@ -354,12 +353,12 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 			continue;
 		}
 
-		float cut = 0.5 * (__cosf(rij * M_PI / rcut) + 1.0);
+		float cut = 0.5 * (cosf(rij * M_PI / rcut) + 1.0);
 
 		for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
 			int z = k % ngauss;
-			int korb = int(floor(float(k / ngauss)));
+			int korb = int(floor(float(k) / ngauss));
 
 			int gto_power = sgto_powers[korb];
 
@@ -415,8 +414,8 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 			continue;
 		}
 
-		float cut = 0.5 * (__cosf(rij * M_PI / rcut) + 1.0);
-		float dcut = -0.5 * (__sinf(rij * M_PI / rcut)) * M_PI / rcut;
+		float cut = 0.5 * (cosf(rij * M_PI / rcut) + 1.0);
+		float dcut = -0.5 * (sinf(rij * M_PI / rcut)) * M_PI / rcut;
 
 		for (int x = 0; x < 3; x++) {
 
@@ -436,7 +435,7 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 			for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
 				int z = k % ngauss;
-				int korb = int(floor(float(k / ngauss)));
+				int korb = int(floor(float(k) / ngauss));
 
 				int gto_power = sgto_powers[korb];
 
@@ -508,7 +507,7 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 			for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
 				int z = k % ngauss;
-				int korb = int(floor(float(k / ngauss)));
+				int korb = int(floor(float(k) / ngauss));
 
 				int lchannel = sgto_powers[korb];
 
@@ -534,7 +533,7 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 			for (int k = threadIdx.x; k < (lmax + 1) * ngauss; k += blockDim.x) {
 
 				int z = k % ngauss;
-				int l = int(floor(float(k / ngauss)));
+				int l = int(floor(float(k) / ngauss));
 
 				for (int m = 0; m < nspecies; m++) {
 					for (int n = m + 1; n < nspecies; n++) {
@@ -576,7 +575,7 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 	for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
 		int z = k % ngauss;
-		int korb = int(floor(float(k / ngauss)));
+		int korb = int(floor(float(k) / ngauss));
 
 		int lchannel = sgto_powers[korb];
 
@@ -600,7 +599,7 @@ __global__ void EGTO_atomic_derivative_kernel_float(const torch::PackedTensorAcc
 	for (int k = threadIdx.x; k < (lmax + 1) * ngauss; k += blockDim.x) {
 
 		int z = k % ngauss;
-		int l = int(floor(float(k / ngauss)));
+		int l = int(floor(float(k) / ngauss));
 
 		for (int m = 0; m < nspecies; m++) {
 			for (int n = m + 1; n < nspecies; n++) {
@@ -1116,7 +1115,7 @@ void elementalGTOGPUSharedMem_float(torch::Tensor coordinates, torch::Tensor cha
 	int nspecies = species.size(0);
 	int norbs = gto_components.size(0);
 
-	int nmbody = int((float(nspecies + 1) / 2.0) * nspecies);
+	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
 
 	int currBatch = nbatch * natoms;
 
@@ -1160,7 +1159,7 @@ void elementalGTOGPUSharedMemDerivative_float(torch::Tensor coordinates, torch::
 	int nspecies = species.size(0);
 	int norbs = gto_components.size(0);
 
-	int nmbody = int((float(nspecies + 1) / 2.0) * nspecies);
+	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
 
 	int currBatch = nbatch * natoms;
 

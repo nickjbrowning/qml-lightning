@@ -78,7 +78,7 @@ def get_elemental_gto(coordinates: torch.Tensor, charges: torch.Tensor, species:
     element_types = get_element_types(coordinates, charges, species)
     end.record()
     torch.cuda.synchronize()
-
+    
     if (gradients):
         start.record()
         output = egto_gpu.elemental_gto_gpu_shared(coordinates, charges, species, element_types, mbody_list,

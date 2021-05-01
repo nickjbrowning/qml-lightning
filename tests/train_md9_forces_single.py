@@ -7,6 +7,33 @@ from qml_lightning.representations.dimensionality_reduction import get_reductors
 from qml_lightning.representations.EGTO import ElementalGTO
 import argparse
 
+
+def grab_data(npz_path, indexes):
+    
+    self_energy = torch.Tensor([0., -0.500273, 0., 0., 0., 0., -37.845355, -54.583861, -75.064579, -99.718730]).cuda()
+    hartree2kcalmol = 627.5095
+    
+    data = np.load(npz_path)
+
+    coords = data['R']
+    nuclear_charges = data['z']
+    energies = data['E'].flatten()
+    forces = data['F']
+    
+    nuclear_charges = np.repeat(nuclear_charges[np.newaxis,:], data['R'].shape[0], axis=0)
+  
+    coordinates = torch.from_numpy(coords[indexes]).float().cuda()
+    coordinates.requires_grad = True
+    charges = torch.from_numpy(nuclear_charges[indexes]).float().cuda()
+    energies = torch.from_numpy(energies[indexes]).float().cuda()
+    forces = torch.from_numpy(forces[indexes]).float().cuda()
+    
+    self_interaction = self_energy[charges.long()].sum(axis=1) * hartree2kcalmol
+    energies = energies - self_interaction
+    
+    return coordinates, charges, energies, forces
+
+
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
@@ -19,7 +46,7 @@ if __name__ == "__main__":
     '''model parameters'''
     parser.add_argument("-sigma", type=float, default=20.0)
     parser.add_argument("-llambda", type=float, default=1e-10)
-    parser.add_argument("-npcas", type=int, default=128)
+    parser.add_argument("-npcas", type=int, default=256)
     parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nfeatures", type=int, default=8192)
     
@@ -72,6 +99,7 @@ if __name__ == "__main__":
     
     forces = data['F']
     elements = np.unique(data['z'])
+    # elements = np.array([1, 6, 7, 8])
     nuclear_charges = np.repeat(nuclear_charges[np.newaxis,:], data['R'].shape[0], axis=0)
     
     ALL_IDX = np.arange(coords.shape[0])
@@ -81,26 +109,10 @@ if __name__ == "__main__":
     train_indexes = ALL_IDX[:ntrain]
     test_indexes = ALL_IDX[ntrain:ntrain + ntest]
     
-    self_energy = torch.Tensor([0., -0.500273, 0., 0., 0., 0., -37.845355, -54.583861, -75.064579, -99.718730]).cuda()
-    hartree2kcalmol = 627.5095
+    train_coordinates, train_charges, train_energies, train_forces = grab_data(args.data, train_indexes)
     
-    train_coordinates = torch.from_numpy(coords[train_indexes]).float().cuda()
-    train_charges = torch.from_numpy(nuclear_charges[train_indexes]).float().cuda()
-    train_energies = torch.from_numpy(energies[train_indexes]).float().cuda()
-    train_forces = torch.from_numpy(forces[train_indexes]).float().cuda()
-    
-    self_interaction = self_energy[train_charges.long()].sum(axis=1) * hartree2kcalmol
-    train_energies = train_energies - self_interaction
-    
-    test_coordinates = torch.from_numpy(coords[test_indexes]).float().cuda()
-    test_coordinates.requires_grad = True
-    test_charges = torch.from_numpy(nuclear_charges[test_indexes]).float().cuda()
-    test_energies = torch.from_numpy(energies[test_indexes]).cuda()
-    test_forces = torch.from_numpy(forces[test_indexes]).cuda()
-    
-    self_interaction = self_energy[test_charges.long()].sum(axis=1) * hartree2kcalmol
-    test_energies = test_energies - self_interaction
-        
+    test_coordinates, test_charges, test_energies, test_forces = grab_data(args.data, test_indexes)
+
     species = torch.from_numpy(elements).type(torch.float32).cuda()
 
     start = torch.cuda.Event(enable_timing=True)
@@ -123,14 +135,17 @@ if __name__ == "__main__":
     GtrainY = torch.zeros(nfeatures, 1, device=device, dtype=torch.float64)
     
     start.record()
-    for i in range(nbatch):
+    for j in range(nbatch):
         
         zbatch = np.int(np.ceil(ntrain / nbatch))
         
-        batch_train_charges = train_charges[i * zbatch:(i + 1) * zbatch]
-        batch_train_coordinates = train_coordinates[i * zbatch:(i + 1) * zbatch]
-        batch_energies = train_energies[i * zbatch:(i + 1) * zbatch]
-        batch_forces = train_forces[i * zbatch:(i + 1) * zbatch]
+        startj = j * zbatch
+        endj = (j + 1) * zbatch
+        
+        batch_train_coordinates = train_coordinates[startj:endj]
+        batch_train_charges = train_charges[startj:endj]
+        batch_energies = train_energies[startj:endj]
+        batch_forces = train_forces[startj:endj]
         
         train_gto, train_gto_derivative = get_elemental_gto(batch_train_coordinates, batch_train_charges, species, ngaussians, eta, lmax, rcut, gradients=True)
         
@@ -144,6 +159,9 @@ if __name__ == "__main__":
             batch_indexes = torch.where(indexes)[0].type(torch.int)
             
             sub = train_gto[indexes]
+            
+            if (sub.shape[0] == 0): continue
+            
             sub_grad = train_gto_derivative[indexes]
     
             sub = project_representation(sub, reductors[e])
@@ -157,16 +175,12 @@ if __name__ == "__main__":
         
         Gtrain_derivative = Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures)
         
-        # ZtrainY += torch.matmul(Ztrain.double().T, batch_energies.double())
-        # GtrainY += torch.matmul(Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures).double().T, batch_forces.double().flatten())
-        
         ZtrainY += torch.matmul(Ztrain.T, batch_energies.double()[:, None])
         GtrainY += torch.matmul(Gtrain_derivative.T, batch_forces.double().flatten()[:, None])
 
         ZTZ += torch.matmul(Ztrain.T, Ztrain)
         ZTZ += torch.matmul(Gtrain_derivative.T, Gtrain_derivative)
-        # ZTZ += torch.matmul(Ztrain.double().T, Ztrain.double()) + torch.matmul(Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures).double().T,
-        #                                                 Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures).double()) 
+
     end.record()
     torch.cuda.synchronize()
     print ("---Gramm Matrix---")
@@ -174,18 +188,14 @@ if __name__ == "__main__":
     print("batched ZTZ time: ", start.elapsed_time(end), "ms")
     
     ZTZ[torch.eye(nfeatures).bool()] += llambda
-    
+
     start.record()
     Y = ZtrainY + GtrainY
     
     alpha = torch.solve(Y, ZTZ).solution
     
-    del ZTZ, ZtrainY, GtrainY, Ztrain, Gtrain_derivative
-    
     end.record()
     torch.cuda.synchronize()
-
-    print (alpha)
 
     print("coefficients time: ", start.elapsed_time(end), "ms")
     
@@ -196,27 +206,28 @@ if __name__ == "__main__":
     alpha.cpu().numpy().tofile("alpha.npy")
     
     for e in elements:
-        Dmat[e].cpu().numpy().tofile("W_" + str(e) + ".npy")
-        bk[e].cpu().numpy().tofile("b_" + str(e) + ".npy")
-        reductors[e].cpu().numpy().tofile("reductor_" + str(e) + ".npy")
+        if (e in reductors):
+            Dmat[e].cpu().numpy().tofile("W_" + str(e) + ".npy")
+            bk[e].cpu().numpy().tofile("b_" + str(e) + ".npy")
+            reductors[e].cpu().numpy().tofile("reductor_" + str(e) + ".npy")
     
     startg = torch.cuda.Event(enable_timing=True)
     endg = torch.cuda.Event(enable_timing=True)
     
     fingerprint = ElementalGTO(species=elements, low_cutoff=0.0, high_cutoff=rcut, n_gaussians=ngaussians, eta=eta, Lmax=lmax, device=device)
-        
+
     rep = fingerprint.forward(test_coordinates, test_charges.int())
-    
+
     Ztest = torch.zeros(ntest, nfeatures, device=device, dtype=torch.float64)
     
     nstacks = int(float(nfeatures) / npcas)
-    
-    coeff_normalisation = np.sqrt(npcas) / sigma
+
     feature_normalisation = np.sqrt(2.0 / float(nfeatures))
     
     for e in elements:
   
-        indexes = test_charges == e
+        indexes = test_charges.int() == e
+        
         batch_indexes = torch.where(indexes)[0].type(torch.int)
         
         sub = rep[indexes]

@@ -12,19 +12,16 @@ import torch
 
 
 def get_reductors(X, charges, npcas, elements):
-    
-    '''
-    
-    '''
-    
+
     reductors = {}
     
     for e in elements:
         
+        if (e not in charges):
+            continue
+        
         indexes = charges == e
-    
-        batch_indexes = torch.where(indexes)[0].type(torch.int)
-    
+        
         sub = X[indexes]
         
         perm = torch.randperm(sub.size(0))
