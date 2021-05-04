@@ -8,9 +8,8 @@ using namespace std;
 
 /*Reasonably efficient implementation - builds the uncontracted GTO basis in shared memory, and then contracts it in a separate
  *shared memory buffer, before saving to global memory. Parallelisation occurs over norbs x gridpoints, rather than natoms, as
- *this has better potential for removing bank conflicts. */
+ *this has better potential for removing bank conflicts and serialising global memory access. */
 
-//TODO need to make sure access to norb_temporary isn't serialized on shared memory bank access.
 __global__ void EGTO_atomic_kernel_gridpara_float(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,

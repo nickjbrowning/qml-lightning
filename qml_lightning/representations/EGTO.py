@@ -153,7 +153,7 @@ class ElementalGTO(nn.Module):
         but might move more of this to cuda when I have time.
     '''
 
-    def __init__(self, species=[1, 6, 7, 8], low_cutoff=0.0, high_cutoff=6.0, n_gaussians=20, eta=2.3, Lmax=2, device=torch.device('cpu')):
+    def __init__(self, species=[1, 6, 7, 8], low_cutoff=0.0, high_cutoff=6.0, n_gaussians=20, eta=2.3, Lmax=2, device=torch.device('cpu'), trainable_basis=False):
         
         super(ElementalGTO, self).__init__()
         self.device = device
@@ -167,6 +167,8 @@ class ElementalGTO(nn.Module):
         self.Lmax = Lmax
         
         offset = torch.linspace(low_cutoff, high_cutoff, n_gaussians + 1, device=device)[1:]
+        widths = torch.full([n_gaussians], eta, device=device)
+        # inv_scaling = torch.full([n_gaussians], 2.0, device=device)
         
         element_to_id = torch.zeros(max(species) + 1, dtype=torch.long, device=device)
         
@@ -191,8 +193,14 @@ class ElementalGTO(nn.Module):
         
         self.register_buffer("fingerprint_size", torch.FloatTensor(self.fp_size))
 
-        self.offsets = offset
-        self.width = eta
+        if (trainable_basis):
+            self.inv_factor = nn.Parameter(torch.cuda.FloatTensor([2.0], device=device))
+            self.width = nn.Parameter(widths)
+            self.offsets = nn.Parameter(offset)
+        else:
+            self.inv_factor = 2.0
+            self.offsets = offset
+            self.width = eta
             
         self.pi = torch.acos(torch.zeros(1)).cuda() * 2
     
@@ -250,13 +258,22 @@ class ElementalGTO(nn.Module):
         cutoffs = 0.5 * (torch.cos(distances * self.pi / self.high_cutoff) + 1.0)
        
         radial_basis = torch.sqrt(self.width / self.pi) * torch.exp(-self.width * centered_distances) * cutoffs[..., None] * pairlist_coeffs[..., None]
-       
-        inv_scaling = torch.pow(1.0 / distances[..., None], 2.0 + self.angular_indexes) * pairlist_coeffs[..., None]
+        
+        # print (distances[..., None, None].shape)
+        # print (pairlist_coeffs[..., None, None].shape)
+        # print (self.inv_factor[None, None, None, None,:].shape)
+        # print (self.angular_indexes[None, None,:, None].shape)
+        
+        # inv_scaling = torch.pow(1.0 / distances[..., None, None], self.inv_factor[None, None, None, None,:] + self.angular_indexes[None, None,:, None]) * pairlist_coeffs[..., None, None]
+        
+        inv_scaling = torch.pow(1.0 / distances[..., None], self.inv_factor + self.angular_indexes) * pairlist_coeffs[..., None]
         
         angular_terms = inv_scaling * torch.pow(nbh_coords[..., None, 0] , self.angular_components[:, 0 ]) * \
                 torch.pow(nbh_coords[..., None, 1] , self.angular_components[:, 1 ]) * \
                 torch.pow(nbh_coords[..., None, 2] , self.angular_components[:, 2 ])
-
+        
+        # print (angular_terms.shape)
+        
         fingerprint = torch.zeros(n_batch, n_atoms, self.Lmax + 1, self.n_mbody, self.n_gaussians, dtype=radial_basis.dtype, device=self.device)
         
         # first construct the single-species three-body terms, e.g X-HH, X-CC...
@@ -274,6 +291,7 @@ class ElementalGTO(nn.Module):
 
             filtered_radial = coeffs[..., None] * radial_basis 
         
+            # print (filtered_radial[..., None,:].shape)
             test = angular_terms[... , None] * filtered_radial[..., None,:] 
         
             test = torch.sum(test, dim=2)
