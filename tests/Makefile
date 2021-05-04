@@ -9,4 +9,4 @@ get-data:
 	wget http://www.quantum-machine.org/gdml/data/npz/toluene_dft.npz -O data/toluene_dft.npz
 	wget http://www.quantum-machine.org/gdml/data/npz/aspirin_dft.npz -O data/aspirin_dft.npz
 	
-	wget https://ndownloader.figshare.com/files/18112775 O data/ani-1x.h5
+	wget https://ndownloader.figshare.com/files/18112775 -O data/ani-1x.h5
