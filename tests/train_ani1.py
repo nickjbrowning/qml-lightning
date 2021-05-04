@@ -188,7 +188,7 @@ if __name__ == "__main__":
     
         test_energies[i] = energy
     
-    reductors = get_reductors(train_coordinates, train_charges, npcas, elements)
+    reductors = get_reductors(train_coordinates[:10000], train_charges[:10000], npcas, elements)
   
     feature_normalization = np.sqrt(2.0 / nfeatures)
    
