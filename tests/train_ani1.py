@@ -9,7 +9,7 @@ from qml_lightning.representations.EGTO import ElementalGTO
 from qml_lightning.utils.ani_dataloader import iter_data_buckets
 import argparse
 
-path_to_h5file = '/home/nick/data/ani1x-release.h5'
+path_to_h5file = 'data/ani-1x.h5'
 
 
 def get_reductors(X, Z, npcas, species):
