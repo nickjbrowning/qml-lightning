@@ -70,7 +70,7 @@ if __name__ == "__main__":
     
     parser.add_argument("-ntrain", type=int, default=1000)
     parser.add_argument("-ntest", type=int, default=250)
-    parser.add_argument("-nbatch", type=int, default=4)
+    parser.add_argument("-num_batch", type=int, default=1000)
     
     '''model parameters'''
     parser.add_argument("-sigma", type=float, default=20.0)
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     print (args)
     
     ntrain = args.ntrain
-    nbatch = args.nbatch
+    num_batch = args.num_batch
     ntest = args.ntest
 
     ngaussians = args.ngaussians
@@ -172,8 +172,6 @@ if __name__ == "__main__":
     
         train_energies[i] = energy
     
-    print (train_energies)
-    
     for i in range(ntest):
         
         charges = torch.from_numpy(Zs[test_indexes[i]]).float().cuda()
@@ -204,15 +202,19 @@ if __name__ == "__main__":
     nstacks = int(float(nfeatures) / npcas)
     
     start.record()
+    
+    Ztrain = torch.zeros(num_batch, nfeatures, device=device, dtype=torch.float64)
+    batch_energies = torch.zeros(num_batch, 1, device=device, dtype=torch.float64)
+    
+    idx = 0
+    
     for i, (coordinates, charges) in tqdm(enumerate(zip(train_coordinates, train_charges)), ascii=True, desc="Building Feature Matrix"): 
         
         coordinates = coordinates.unsqueeze(0)
         charges = charges.unsqueeze(0)
         
         rep = fingerprint.forward(coordinates, charges.int())
-        
-        Ztrain = torch.zeros(1, nfeatures, device=device, dtype=torch.float64)
-        
+
         for e in elements:
             
             indexes = charges.int() == e
@@ -231,12 +233,20 @@ if __name__ == "__main__":
             coeffs = coeff_normalisation * SORFTransformCuda.apply(Dmat[e] * sub)
             coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
             
-            Ztrain[0,:] += feature_normalisation * torch.sum(torch.cos(coeffs + bk[e]).double(), dim=0)
+            Ztrain[idx,:] += feature_normalisation * torch.sum(torch.cos(coeffs + bk[e]).double(), dim=0)
+            batch_energies[idx, 0] = train_energies.double()[i]
             
-        ZTZ += torch.matmul(Ztrain.T, Ztrain)
-
-        ZtrainY += Ztrain.T * train_energies.double()[i]  # torch.matmul(Ztrain.T, train_energies.double()[i, None])
+        idx = idx + 1
         
+        if (idx % num_batch == 0):
+            idx = 0
+            
+            ZTZ += torch.matmul(Ztrain.T, Ztrain)
+            ZtrainY += torch.matmul(Ztrain.T, batch_energies)
+            
+            Ztrain = torch.zeros(num_batch, nfeatures, device=device, dtype=torch.float64)
+            batch_energies = torch.zeros(num_batch, 1, device=device, dtype=torch.float64)
+            
     end.record()
     torch.cuda.synchronize()
 
@@ -269,14 +279,16 @@ if __name__ == "__main__":
             bk[e].cpu().numpy().tofile("b_" + str(e) + ".npy")
             reductors[e].cpu().numpy().tofile("reductor_" + str(e) + ".npy")
     
-    Ztest = torch.zeros(ntest, nfeatures, device=device, dtype=torch.float64)
-    
     start.record()
+    
+    predictions = torch.zeros(ntest, device=device, dtype=torch.float64)
     
     for i, (coordinates, charges) in tqdm(enumerate(zip(test_coordinates, test_charges)), ascii=True, desc="Computing Predictions"): 
         
         coordinates = coordinates.unsqueeze(0)
         charges = charges.unsqueeze(0)
+        
+        Ztest = torch.zeros(1, nfeatures, device=device, dtype=torch.float64)
         
         rep = fingerprint.forward(coordinates, charges.int())
         
@@ -298,14 +310,14 @@ if __name__ == "__main__":
             coeffs = coeff_normalisation * SORFTransformCuda.apply(Dmat[e] * sub)
             coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
             
-            Ztest[i,:] += feature_normalisation * torch.sum(torch.cos(coeffs + bk[e]).double(), dim=0)
-    
-    energies_predict = torch.matmul(Ztest, alpha)
+            Ztest[0,:] += feature_normalisation * torch.sum(torch.cos(coeffs + bk[e]).double(), dim=0)
+        
+        predictions[i] = torch.matmul(Ztest, alpha)
     
     end.record()
     torch.cuda.synchronize()
     
     print("prediction for", ntest, "molecules time: ", start.elapsed_time(end), "ms")
     
-    print("Energy MAE TORCH:", torch.mean(torch.abs(energies_predict - test_energies)))
+    print("Energy MAE TORCH:", torch.mean(torch.abs(predictions - test_energies)))
   
