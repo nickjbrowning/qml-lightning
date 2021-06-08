@@ -108,6 +108,8 @@ if __name__ == "__main__":
     
     model.calculate_self_energy(train_charges, train_energies)
     
+    model.get_reductors([Xs[i] for i in reductor_samples], [Zs[i]for i in reductor_samples])
+    
     # model.mc_optimize_parameters(train_coordinates, train_charges, train_energies,
     #                             test_coordinates, test_charges, test_energies)
     
