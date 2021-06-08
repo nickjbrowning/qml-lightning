@@ -10,7 +10,8 @@ Created on 1 Apr 2021
 
 from qml_lightning.cuda import egto_gpu
 from qml_lightning.cuda import pairlist_gpu
-
+from qml_lightning.cuda import pairlist_gpu2
+from qml_lightning.cuda import egto_gpu2
 import torch
 import numpy as np
 import torch.nn as nn
@@ -38,6 +39,52 @@ def generate_angular_numbers(lmax):
         angular_indexes = torch.IntTensor(angular_indexes)
         
         return angular_components, angular_weights, angular_indexes
+
+
+def get_egto(X: torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor,
+             species=torch.Tensor([1, 6, 7, 8, 9]).float().cuda(), ngaussians=20, eta=2.3, lmax=2, rcut=6.0, gradients=False):
+    
+    orbital_components, orbital_weights, orbital_indexes = generate_angular_numbers(lmax)
+    orbital_components = orbital_components.cuda()
+    orbital_weights = orbital_weights.cuda()
+    orbital_indexes = orbital_indexes.cuda()
+    
+    offset = torch.linspace(0.0, rcut, ngaussians + 1)[1:].cuda()
+    
+    mbody_list = torch.zeros(species.shape[0], species.shape[0], dtype=torch.int32)
+        
+    count = 0
+    
+    for i in range(species.shape[0]):
+        mbody_list[i][i] = count
+        count += 1
+        
+    for i in range(species.shape[0]):
+        for j in range(i + 1, species.shape[0]):
+            mbody_list[i][j] = count
+            mbody_list[j][i] = count
+            count += 1
+            
+    mbody_list = mbody_list.cuda()
+    
+    nneighbours = pairlist_gpu2.get_num_neighbours_gpu2(X, atom_counts, rcut)
+        
+    max_neighbours = nneighbours.max().item()
+ 
+    neighbourlist = pairlist_gpu2.get_neighbour_list_gpu2(X, atom_counts, max_neighbours, rcut)
+    
+    element_types = egto_gpu2.get_element_types_gpu2(X, Z, atom_counts, species) 
+    
+    output = egto_gpu2.get_egto(X, Z, species, element_types,
+    atomIDs, molIDs, neighbourlist, nneighbours, mbody_list,
+    orbital_components, orbital_weights, orbital_indexes, offset, eta, lmax, rcut,
+    gradients)
+    
+    if (gradients):
+        return output[0], output[1] 
+        
+    else:
+        return output[0]
 
 
 def get_elemental_gto(coordinates: torch.Tensor, charges: torch.Tensor, species: torch.Tensor, ngaussians: int, eta: float, lmax: int, rcut: float, gradients=False,

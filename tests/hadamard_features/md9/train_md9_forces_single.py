@@ -25,8 +25,8 @@ def grab_data(npz_path, indexes):
     coordinates = torch.from_numpy(coords[indexes]).float().cuda()
     coordinates.requires_grad = True
     charges = torch.from_numpy(nuclear_charges[indexes]).float().cuda()
-    energies = torch.from_numpy(energies[indexes]).float().cuda()
-    forces = torch.from_numpy(forces[indexes]).float().cuda()
+    energies = torch.from_numpy(energies[indexes]).double().cuda()
+    forces = torch.from_numpy(forces[indexes]).double().cuda()
     
     self_interaction = self_energy[charges.long()].sum(axis=1) * hartree2kcalmol
     energies = energies - self_interaction
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("-ntrain", type=int, default=1000)
     parser.add_argument("-ntest", type=int, default=250)
     parser.add_argument("-nbatch", type=int, default=4)
-    parser.add_argument("-data", type=str, default='data/aspirin_dft.npz')
+    parser.add_argument("-data", type=str, default='../../data/aspirin_dft.npz')
     
     '''model parameters'''
     parser.add_argument("-sigma", type=float, default=20.0)
@@ -175,12 +175,12 @@ if __name__ == "__main__":
         
         Gtrain_derivative = Gtrain_derivative.reshape(zbatch * natoms * 3, nfeatures)
         
-        ZtrainY += torch.matmul(Ztrain.T, batch_energies.double()[:, None])
-        GtrainY += torch.matmul(Gtrain_derivative.T, batch_forces.double().flatten()[:, None])
+        ZtrainY += torch.matmul(Ztrain.T, batch_energies[:, None])
+        GtrainY += torch.matmul(Gtrain_derivative.T, batch_forces.flatten()[:, None])
 
         ZTZ += torch.matmul(Ztrain.T, Ztrain)
         ZTZ += torch.matmul(Gtrain_derivative.T, Gtrain_derivative)
-
+        
     end.record()
     torch.cuda.synchronize()
     print ("---Gramm Matrix---")
@@ -188,7 +188,15 @@ if __name__ == "__main__":
     print("batched ZTZ time: ", start.elapsed_time(end), "ms")
     
     ZTZ[torch.eye(nfeatures).bool()] += llambda
-
+    
+    print (ZTZ)
+    
+    u, s = torch.linalg.eigh(ZTZ)
+    
+    print (u)
+    condition_nr = torch.abs(torch.max(u)) / torch.abs(torch.min(u))
+    print ("condition nr = ", condition_nr)
+    
     start.record()
     Y = ZtrainY + GtrainY
     
@@ -198,7 +206,7 @@ if __name__ == "__main__":
     torch.cuda.synchronize()
 
     print("coefficients time: ", start.elapsed_time(end), "ms")
-    
+   
     start.record()
 
     alpha = alpha[:, 0]

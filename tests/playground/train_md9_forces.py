@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument("-ntrain", type=int, default=1000)
     parser.add_argument("-ntest", type=int, default=250)
     parser.add_argument("-nbatch", type=int, default=4)
-    parser.add_argument("-data", type=str, default='data/aspirin_dft.npz')
+    parser.add_argument("-data", type=str, default='../data/aspirin_dft.npz')
     
     '''model parameters'''
     parser.add_argument("-sigma", type=float, default=20.0)

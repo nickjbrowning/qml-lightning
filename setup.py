@@ -28,10 +28,18 @@ def requirements():
 
 if torch.cuda.is_available() and CUDA_HOME is not None:
     
-    extension = CUDAExtension(
+    gto_extension = CUDAExtension(
         '.cuda.egto_gpu', [
             'qml_lightning/cuda/gto_cuda.cpp',
             'qml_lightning/cuda/gto_cuda_kernel.cu'
+        ],
+        extra_compile_args={'cxx': ['-g'],
+                            'nvcc': ['-O2', '-ftz=true']})
+    
+    gto2_extension = CUDAExtension(
+        '.cuda.egto_gpu2', [
+            'qml_lightning/cuda/gto_cuda2.cpp',
+            'qml_lightning/cuda/gto_cuda_kernel2.cu'
         ],
         extra_compile_args={'cxx': ['-g'],
                             'nvcc': ['-O2', '-ftz=true']})
@@ -52,9 +60,28 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
         extra_compile_args={'cxx': ['-g'],
                             'nvcc': ['-O2', '-ftz=true']})
     
-    ext_modules.append(extension)
+    pairlist2_extension = CUDAExtension(
+        '.cuda.pairlist_gpu2', [
+            'qml_lightning/cuda/pairlist_cuda2.cpp',
+            'qml_lightning/cuda/pairlist_kernel2.cu'
+        ],
+        extra_compile_args={'cxx': ['-g'],
+                            'nvcc': ['-O2', '-ftz=true']})
+    
+    operator_extension = CUDAExtension(
+        '.cuda.operator_gpu', [
+            'qml_lightning/cuda/operator_cuda.cpp',
+            'qml_lightning/cuda/operator_kernel.cu'
+        ],
+        extra_compile_args={'cxx': ['-g'],
+                            'nvcc': ['-O2', '-ftz=true']})
+    
+    ext_modules.append(gto_extension)
+    ext_modules.append(gto2_extension)
     ext_modules.append(hd_extension)
     ext_modules.append(pairlist_extension)
+    ext_modules.append(pairlist2_extension)
+    ext_modules.append(operator_extension)
     
 else:
     print("ERROR: cuda not available, or CUDA_HOME not set.")
