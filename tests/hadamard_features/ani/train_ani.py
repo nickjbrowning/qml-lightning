@@ -2,19 +2,8 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from qml_lightning.representations.EGTO import get_elemental_gto
-from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, get_SORF_coefficients, get_features, get_feature_derivatives, SORFTransformCuda
-from qml_lightning.representations.dimensionality_reduction import project_representation, project_derivative
-from qml_lightning.representations.EGTO import ElementalGTO
 from qml_lightning.utils.ani_dataloader import iter_data_buckets
 import argparse
-
-from qml_lightning.cuda import pairlist_gpu2
-from qml_lightning.cuda import egto_gpu2
-from qml_lightning.representations.EGTO import get_egto
-
-from train_ani_energies import format_data
-from train_ani_energies import get_reductors
 
 from qml_lightning.models.random_features import RandomFeaturesModel
 
