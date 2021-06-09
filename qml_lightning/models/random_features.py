@@ -315,7 +315,7 @@ class RandomFeaturesModel():
         best_sigma = sigmas[idxs[min_idx, 0]]
         best_llambda = lambdas[idxs[min_idx, 1]]
         
-        print ("Best Kfold MAE: ", errors[min_idx], "sigma = ", best_sigma, "lambda = ", best_llambda)
+        print ("Best MAE: ", errors[min_idx], "sigma = ", best_sigma, "lambda = ", best_llambda)
     
     def mc_optimize_parameters(self, Xtrain, Ztrain, Etrain, Xval, Zval, Eval, niter=500):
         from tqdm import tqdm
