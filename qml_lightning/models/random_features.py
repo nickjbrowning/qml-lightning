@@ -288,6 +288,10 @@ class RandomFeaturesModel():
                     test_energies = data['energies']
                     max_natoms = data['natom_counts'].max().item()
                     
+                    self.sigma = sigma
+                    self.coeff_normalisation = np.sqrt(self.npcas) / sigma
+                    self.llambda = llambda
+                    
                     self.train(Xtrain, Ztrain, Etrain, print_info=False)
                     
                     energy_predictions = self.predict_cuda(Xtest, Ztest, max_natoms, forces=False, print_info=False)

@@ -114,7 +114,7 @@ if __name__ == "__main__":
     #                             test_coordinates, test_charges, test_energies)
     
     sigmas = np.linspace(2, 50, 15)
-    llambdas = np.logspace(-13, -7, 10)
+    llambdas = np.logspace(-13, -7, 7)
     
     model.hyperparam_opt_nested_cv(train_coordinates, train_charges, train_energies,
                                    sigmas, llambdas, 5)
