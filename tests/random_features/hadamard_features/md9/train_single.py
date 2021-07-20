@@ -3,7 +3,8 @@ import numpy as np
 
 import argparse
 
-from qml_lightning.models.random_features import RandomFeaturesModel
+from qml_lightning.representations.EGTO import EGTOCuda
+from qml_lightning.models.hadamard_features import HadamardFeaturesModel
 
 if __name__ == "__main__":
     
@@ -13,20 +14,21 @@ if __name__ == "__main__":
     parser.add_argument("-ntest", type=int, default=250)
     parser.add_argument("-nreductor_samples", type=int, default=1024)
     parser.add_argument("-nbatch", type=int, default=128)
-    parser.add_argument("-data", type=str, default='../../data/aspirin_dft.npz')
+    parser.add_argument("-data", type=str, default='../../../data/aspirin_dft.npz')
     
     '''model parameters'''
-    parser.add_argument("-sigma", type=float, default=20.0)
+    parser.add_argument("-sigma", type=float, default=3.0)
     parser.add_argument("-llambda", type=float, default=1e-10)
-    parser.add_argument("-npcas", type=int, default=256)
+    parser.add_argument("-npcas", type=int, default=128)
     parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nfeatures", type=int, default=8192)
     
     '''representation parameters'''
-    parser.add_argument("-eta", type=float, default=2.3)
+    parser.add_argument("-eta", type=float, default=2.0)
     parser.add_argument("-rcut", type=float, default=6.0)
     parser.add_argument("-lmax", type=int, default=2)
     parser.add_argument("-ngaussians", type=int, default=20)
+    parser.add_argument("-forces", type=int, default=1)
     
     args = parser.parse_args()
     
@@ -48,6 +50,7 @@ if __name__ == "__main__":
     ntransforms = args.ntransforms
     nfeatures = args.nfeatures
     
+    use_forces = args.forces
     npcas = args.npcas
     
     sigma = args.sigma
@@ -71,7 +74,7 @@ if __name__ == "__main__":
     energies = data['E'].flatten()
     
     forces = data['F']
-    elements = np.unique(data['z'])
+    unique_z = np.unique(data['z'])
     # elements = np.array([1, 6, 7, 8])
     nuclear_charges = np.repeat(nuclear_charges[np.newaxis,:], data['R'].shape[0], axis=0)
     
@@ -86,16 +89,30 @@ if __name__ == "__main__":
     test_indexes = ALL_IDX[ntrain:ntrain + ntest]
     reductor_samples = ALL_IDX[ntrain + ntest: ntrain + ntest + nreductor_samples]
     
+    train_coordinates = [coords[i] for i in train_indexes]
+    train_charges = [nuclear_charges[i] for i in train_indexes]
+    train_energies = [energies[i] for i in train_indexes]
+    train_forces = [forces[i] for i in train_indexes]
+    
     test_coordinates = [coords[i] for i in test_indexes]
     test_charges = [nuclear_charges[i] for i in test_indexes]
     test_energies = [energies[i] for i in test_indexes]
     test_forces = [forces[i] for i in test_indexes]
+
+    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax)
+
+    model = HadamardFeaturesModel(rep, elements=unique_z, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
+                                nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)
     
-    model = RandomFeaturesModel(elements=elements, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
-                                nfeatures=nfeatures, npcas=npcas, nbatch=nbatch, npca_choice=nreductor_samples,
-                                ngaussians=ngaussians, eta=eta, lmax=lmax, rcut=rcut)
+    print ("Calculating projection matrices...")
+    model.get_reductors([coords[i] for i in reductor_samples], [nuclear_charges[i]for i in reductor_samples], npcas=npcas)
     
-    model.convert_from_hartree_to_kcal = False
+    print ("Subtracting linear atomic property contributions ...")
+    model.set_subtract_self_energies(True)
+    model.self_energy = torch.Tensor([0., -0.500273, 0., 0., 0., 0., -37.845355, -54.583861, -75.064579, -99.718730]).double() * 627.5095
+    
+    print ("Training model...")
+    model.train(train_coordinates, train_charges, train_energies, train_forces if use_forces else None)
     
     data = model.format_data(test_coordinates, test_charges, test_energies, test_forces)
 
@@ -104,20 +121,7 @@ if __name__ == "__main__":
     
     max_natoms = data['natom_counts'].max().item()
     
-    model.get_reductors([coords[i] for i in reductor_samples], [nuclear_charges[i]for i in reductor_samples])
-
-    model.train([coords[i] for i in train_indexes], [nuclear_charges[i] for i in train_indexes],
-                [energies[i] for i in train_indexes], [forces[i] for i in train_indexes])
-    
-    energy_predictions, force_predictions = model.predict_torch(test_coordinates, test_charges, forces=True)
-
-    energy_predictions = torch.cat(energy_predictions)
-    force_predictions = torch.cat(force_predictions)
-    
-    print("Energy MAE Torch:", torch.mean(torch.abs(energy_predictions - test_energies)))
-    print("Force MAE Torch:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))
-    
     energy_predictions, force_predictions = model.predict_cuda(test_coordinates, test_charges, max_natoms, forces=True)
-    
+
     print("Energy MAE CUDA:", torch.mean(torch.abs(energy_predictions - test_energies)))
     print("Force MAE CUDA:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))
