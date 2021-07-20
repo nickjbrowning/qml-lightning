@@ -1,20 +1,8 @@
-
-
-
 # QML-Lightning - Do Not Share Publically!
 
 <img src="./images/qml_lightning.png" alt="drawing" width="400"/>
 
-GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning.
-
-
-### Kernel Methods
-Random Fourrier Features
-
-Structured Orthogonal Random Features via Fast Hadamard Transforms
-
-### Representations
-Elemental Gaussian-Type Orbital Atomic Density
+GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning. This package includes both the Random Fourrier Feature method (cite: TODO), as well as Structured Orthogonal Random Features (cite: TODO). it additionally contains a highly efficient 3-body representation thats designed specifically to work well on GPUs.
 
 # Requirements
 
@@ -63,7 +51,7 @@ make get-data
 
 This will download the MD9 datasets, as well as the QM9 dataset.
 
-now run the following command to do some ML learning only energies:
+now run the following command to do some ML, learning only energies:
 
 ```python
 python3 train_single.py -ntrain 1000 -ntest 500 -nfeatures 8192 -npcas 128 -sigma 3.0 -llambda 1e-12 -forces 0
@@ -91,6 +79,7 @@ Model + Training Parameters
 
 nfeatures: number of features for the kernel approxmation. Must be a power of 2 in the case of Hadamard features, default = 8192.
 npcas: project the representation using dimenstionality reduction onto a new basis of this size. Must be a power of 2 in the case of Hadamard features, default = 128.
+ntransforms: number of times to apply the [HDx]_j hadamard transform to build the features, default = 1. 
 sigma: kernel width parameter of the kernel we're approximating, default= 3.0.
 llambda: regularization parameter for modifying the diagonals of the ZTZ Gramm Matrix, default = 1e-12.
 forces: 0/1, 0 - train only on energies, 1 - train on energies + forces, default = 1.
