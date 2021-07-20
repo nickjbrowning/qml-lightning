@@ -60,6 +60,8 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 	float riy = coordinates[molID][iatom][1];
 	float riz = coordinates[molID][iatom][2];
 
+	double sqrt_eta = sqrt(eta / M_PI);
+
 	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
 		int j = neighbourlist[molID][iatom][jatom];
 
@@ -127,13 +129,13 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 		float rijy = riy - rjy;
 		float rijz = riz - rjz;
 
-		float rij = sqrtf(rijx * rijx + rijy * rijy + rijz * rijz);
+		float rij = sqrt(rijx * rijx + rijy * rijy + rijz * rijz);
 
 		//if (rij > rcut) { // shouldn't occur due to neighbourlist
 		///	continue;
 		//}
 
-		float cut = 0.5 * (cosf(rij * M_PI / rcut) + 1.0);
+		float cut = 0.5 * (cos(rij * M_PI / rcut) + 1.0);
 
 		for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
@@ -146,11 +148,11 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 			float gto_component_y = sgto_components_y[korb];
 			float gto_component_z = sgto_components_z[korb];
 
-			float ang = powf(rijx, gto_component_x) * powf(rijy, gto_component_y) * powf(rijz, gto_component_z);
+			float ang = pow(rijx, gto_component_x) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
 
-			float val = sqrtf(eta / M_PI) * (1.0 / powf(rij, 2.0 + gto_power)) * ang * cut;
+			float val = sqrt_eta * (1.0 / pow(rij, 2.0 + gto_power)) * ang * cut;
 
-			float gval = expf(-eta * powf(rij - sgridpoints[z], 2.0)) * val;
+			float gval = exp(-eta * pow(rij - sgridpoints[z], 2.0)) * val;
 
 			for (int m = 0; m < nspecies; m++) {
 
@@ -335,11 +337,11 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 		}
 	}
 
-	double sqrtf_eta = sqrt(eta / M_PI);
+	double sqrt_eta = sqrt(eta / M_PI);
 
 	__syncthreads();
 
-//need to generate the representation partially, first, for the derivative.
+//need to generate the representation partially first.
 
 	for (int jatom = 0; jatom < nneighbours_i; jatom++) {
 
@@ -356,13 +358,13 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 		float rijy = riy - rjy;
 		float rijz = riz - rjz;
 
-		float rij = sqrtf(rijx * rijx + rijy * rijy + rijz * rijz);
+		float rij = sqrt(rijx * rijx + rijy * rijy + rijz * rijz);
 
 		if (rij > rcut) {
 			continue;
 		}
 
-		float cut = 0.5 * (cosf(rij * M_PI / rcut) + 1.0);
+		float cut = 0.5 * (cos(rij * M_PI / rcut) + 1.0);
 
 		for (int k = threadIdx.x; k < norbs * ngauss; k += blockDim.x) {
 
@@ -375,13 +377,11 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 			float gto_component_y = sgto_components_y[korb];
 			float gto_component_z = sgto_components_z[korb];
 
-			float ang = powf(rijx, gto_component_x) * powf(rijy, gto_component_y) * powf(rijz, gto_component_z);
+			float ang = pow(rijx, gto_component_x) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
 
-			float val = sqrtf_eta * (1.0 / powf(rij, 2.0 + gto_power)) * ang * cut;
+			float val = sqrt_eta * (1.0 / pow(rij, 2.0 + gto_power)) * ang * cut;
 
-			//float val = sqrtf_eta * (1.0 / rij) * ang * cut;
-
-			float gval = expf(-eta * powf(rij - sgridpoints[z], 2.0)) * val;
+			float gval = exp(-eta * pow(rij - sgridpoints[z], 2.0)) * val;
 
 			for (int m = 0; m < nspecies; m++) {
 
@@ -419,14 +419,14 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 		drij[1] = rijy;
 		drij[2] = rijz;
 
-		float rij = sqrtf(rijx * rijx + rijy * rijy + rijz * rijz);
+		float rij = sqrt(rijx * rijx + rijy * rijy + rijz * rijz);
 
 		if (rij > rcut) {
 			continue;
 		}
 
-		float cut = 0.5 * (cosf(rij * M_PI / rcut) + 1.0);
-		float dcut = -0.5 * (sinf(rij * M_PI / rcut)) * M_PI / rcut;
+		float cut = 0.5 * (cos(rij * M_PI / rcut) + 1.0);
+		float dcut = -0.5 * (sin(rij * M_PI / rcut)) * M_PI / rcut;
 
 		for (int x = 0; x < 3; x++) {
 
@@ -454,13 +454,10 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 				float gto_component_y = sgto_components_y[korb];
 				float gto_component_z = sgto_components_z[korb];
 
-				//float rscaling = (1.0 / rij);
-				//float drscaling = -1.0 / powf(rij, 2.0);
+				float rscaling = (1.0 / pow(rij, 2.0 + gto_power));
+				float drscaling = -(2.0 + float(gto_power)) * (1.0 / pow(rij, 3.0 + float(gto_power)));
 
-				float rscaling = (1.0 / powf(rij, 2.0 + gto_power));
-				float drscaling = -(2.0 + float(gto_power)) * (1.0 / powf(rij, 3.0 + float(gto_power)));
-
-				float ang = powf(rijx, gto_component_x) * powf(rijy, gto_component_y) * powf(rijz, gto_component_z);
+				float ang = pow(rijx, gto_component_x) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
 
 				float dang[3];
 
@@ -471,21 +468,21 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 				//TODO need to make the following more efficient
 				if (x == 0) {
 					if (gto_component_x == 1.0) {
-						dang[0] = -1.0 * powf(rijy, gto_component_y) * powf(rijz, gto_component_z);
+						dang[0] = -1.0 * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
 					} else if (gto_component_x > 1.0) {
-						dang[0] = -gto_component_x * powf(rijx, gto_component_x - 1.0) * powf(rijy, gto_component_y) * powf(rijz, gto_component_z);
+						dang[0] = -gto_component_x * pow(rijx, gto_component_x - 1.0) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
 					}
 				} else if (x == 1) {
 					if (gto_component_y == 1.0) {
-						dang[1] = -1.0 * powf(rijx, gto_component_x) * powf(rijz, gto_component_z);
+						dang[1] = -1.0 * pow(rijx, gto_component_x) * pow(rijz, gto_component_z);
 					} else if (gto_component_y > 1.0) {
-						dang[1] = -gto_component_y * powf(rijy, gto_component_y - 1.0) * powf(rijx, gto_component_x) * powf(rijz, gto_component_z);
+						dang[1] = -gto_component_y * pow(rijy, gto_component_y - 1.0) * pow(rijx, gto_component_x) * pow(rijz, gto_component_z);
 					}
 				} else {
 					if (gto_component_z == 1.0) {
-						dang[2] = -1.0 * powf(rijx, gto_component_x) * powf(rijy, gto_component_y);
+						dang[2] = -1.0 * pow(rijx, gto_component_x) * pow(rijy, gto_component_y);
 					} else if (gto_component_z > 1.0) {
-						dang[2] = -gto_component_z * powf(rijz, gto_component_z - 1.0) * powf(rijx, gto_component_x) * powf(rijy, gto_component_y);
+						dang[2] = -gto_component_z * pow(rijz, gto_component_z - 1.0) * pow(rijx, gto_component_x) * pow(rijy, gto_component_y);
 					}
 				}
 
@@ -493,14 +490,14 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 				float dangx = rscaling * dang[x] * cut;
 				float dcutx = rscaling * ang * dcut * -drijx;
 
-				float radial = expf(-eta * powf(rij - sgridpoints[z], 2.0));
+				float radial = exp(-eta * pow(rij - sgridpoints[z], 2.0));
 				float dradial = -2.0 * eta * (rij - sgridpoints[z]);
 
-				float val = sqrtf(eta / M_PI) * (1.0 / powf(rij, 2.0 + gto_power)) * ang * cut;
+				float val = sqrt_eta * (1.0 / pow(rij, 2.0 + gto_power)) * ang * cut;
 
 				float gval = radial * val;
 
-				float dval_x = sqrtf_eta * radial * (drscalingx + dangx + dcutx + (rscaling * ang * cut * dradial * -drijx));
+				float dval_x = sqrt_eta * radial * (drscalingx + dangx + dcutx + (rscaling * ang * cut * dradial * -drijx));
 
 				for (int m = 0; m < nspecies; m++) {
 

@@ -5,9 +5,10 @@ from tqdm import tqdm
 from qml_lightning.utils.ani_dataloader import iter_data_buckets
 import argparse
 
-from qml_lightning.models.random_features import RandomFeaturesModel
+from qml_lightning.models.hadamard_features import HadamardFeaturesModel
+from qml_lightning.representations.EGTO import EGTOCuda
 
-path_to_h5file = '../../data/ani-1x.h5'
+path_to_h5file = '../../../data/ani-1x/ani-1x.h5'
 
 if __name__ == "__main__":
     
@@ -19,15 +20,16 @@ if __name__ == "__main__":
     
     parser.add_argument("-nbatch", type=int, default=64)
     
+    parser.add_argument("-forces", type=int, default=1)
     '''model parameters'''
-    parser.add_argument("-sigma", type=float, default=20.0)
-    parser.add_argument("-llambda", type=float, default=1e-10)
-    parser.add_argument("-npcas", type=int, default=256)
+    parser.add_argument("-sigma", type=float, default=3.0)
+    parser.add_argument("-llambda", type=float, default=1e-12)
+    parser.add_argument("-npcas", type=int, default=128)
     parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nfeatures", type=int, default=8192)
     
     '''representation parameters'''
-    parser.add_argument("-eta", type=float, default=2.3)
+    parser.add_argument("-eta", type=float, default=2.0)
     parser.add_argument("-rcut", type=float, default=6.0)
     parser.add_argument("-lmax", type=int, default=2)
     parser.add_argument("-ngaussians", type=int, default=20)
@@ -50,6 +52,7 @@ if __name__ == "__main__":
     ntransforms = args.ntransforms
     nfeatures = args.nfeatures
     
+    use_forces = args.forces
     npcas = args.npcas
     
     sigma = args.sigma
@@ -91,26 +94,30 @@ if __name__ == "__main__":
     train_indexes = ALL_IDX[:ntrain]
     test_indexes = ALL_IDX[ntrain:ntrain + ntest]
     reductor_samples = ALL_IDX[ntrain + ntest: ntrain + ntest + nreductor_samples]
-    
-    train_coordinates = [Xs[i] for i in train_indexes]
+
+    train_coordinates = [Xs[i]  for i in train_indexes]
     train_charges = [Zs[i] for i in train_indexes]
-    train_energies = [Es[i] for i in train_indexes]
+    train_energies = [Es[i] for i in train_indexes] 
     train_forces = [Fs[i] for i in train_indexes]
-    
+
     test_coordinates = [Xs[i] for i in test_indexes]
     test_charges = [Zs[i] for i in test_indexes]
     test_energies = [Es[i] for i in test_indexes]
-    test_forces = [Fs[i] for i in test_indexes]
+    test_forces = [Fs[i] for i in test_indexes] 
+        
+    representation = EGTOCuda(species=elements, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax)
     
-    model = RandomFeaturesModel(elements=elements, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
-                                nfeatures=nfeatures, npcas=npcas, nbatch=nbatch, npca_choice=nreductor_samples,
-                                ngaussians=ngaussians, eta=eta, lmax=lmax, rcut=rcut)
+    model = HadamardFeaturesModel(representation, elements=elements, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
+                                nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)
     
-    model.calculate_self_energy(train_charges, train_energies)
+    model.set_convert_hartree2kcal(True)
+    model.set_subtract_self_energies(True)
+    # model.calculate_self_energy(train_charges, train_energies)
+    model.self_energy = torch.Tensor([0., -0.600952980000, 0., 0., 0., 0., -38.08316124000, -54.70775770000, -75.19446356000, 0]).double() * 627.503
     
     model.get_reductors([Xs[i] for i in reductor_samples], [Zs[i]for i in reductor_samples])
     
-    model.train(train_coordinates, train_charges, train_energies, train_forces)
+    model.train(train_coordinates, train_charges, train_energies, train_forces if use_forces else None)
     
     data = model.format_data(test_coordinates, test_charges, test_energies, test_forces)
     

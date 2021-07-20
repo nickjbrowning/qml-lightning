@@ -9,7 +9,7 @@ __global__ void hadamard_kernel(const torch::PackedTensorAccessor32<float, 3, to
 
 	extern __shared__ float s[];
 
-	const float normh = (1.0 / powf(2.0, float(log2N) / 2));
+	const double normh = (1.0 / pow(2.0, double(log2N) / 2.0));
 	const int nstacks = input.size(1);
 
 	for (int stack = 0; stack < nstacks; stack++) {
@@ -89,7 +89,7 @@ __global__ void hadamard_kernel(const torch::PackedTensorAccessor32<float, 3, to
 	}
 }
 
-__global__ void sorf_matrix_kernel_float(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> input,
+__global__ void sorf_matrix_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> input,
 		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> D, torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> output,
 		int nstacks, int log2N) {
 
@@ -110,13 +110,13 @@ __global__ void sorf_matrix_kernel_float(const torch::PackedTensorAccessor32<flo
 
 	extern __shared__ float s[];
 
-	//if (blockIdx.x == 0 && threadIdx.x == 0)
-	//	printf("check: %d %f", N, powf(2.0, float(log2N) / 2));
+//if (blockIdx.x == 0 && threadIdx.x == 0)
+//	printf("check: %d %f", N, powf(2.0, float(log2N) / 2));
 
 	int mdiag = D.size(0); // number of [HD] blocks to compute
-	//loop over N/d hadamard transforms to create length-N feature vector
+//loop over N/d hadamard transforms to create length-N feature vector
 
-	const float normh = (1.0 / powf(2.0, float(log2N) / 2));
+	const double normh = (1.0 / pow(2.0, double(log2N) / 2.0));
 
 	for (int stack = 0; stack < nstacks; stack++) {
 
@@ -203,14 +203,14 @@ __global__ void sorf_matrix_kernel_float(const torch::PackedTensorAccessor32<flo
 	}
 }
 
-__global__ void compute_featurisation_float(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> coefficients,
+__global__ void compute_featurisation_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> coefficients,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> bias,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> ordering,
-		torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> features) {
+		torch::PackedTensorAccessor32<double, 2, torch::RestrictPtrTraits> features) {
 
-	//coefficients: natoms, nfeatures
-	//features nbatch, nfeatures
-	//ordering: contains the indexes of which nbatch to add atom j to.
+//coefficients: natoms, nfeatures
+//features nbatch, nfeatures
+//ordering: contains the indexes of which nbatch to add atom j to.
 
 	int nfeatures = coefficients.size(1);
 	int natoms = coefficients.size(0);
@@ -219,19 +219,19 @@ __global__ void compute_featurisation_float(const torch::PackedTensorAccessor32<
 
 	int batchID = ordering[iatom];
 
-	const float normf = sqrt(2.0 / float(nfeatures));
+	const double normf = sqrt(2.0 / double(nfeatures));
 
 	for (int N = threadIdx.x; N < nfeatures; N += blockDim.x) {
-		atomicAdd(&features[batchID][N], cos(coefficients[iatom][N] + bias[N]) * normf);
+		atomicAdd(&features[batchID][N], cos((double) coefficients[iatom][N] + (double) bias[N]) * normf);
 	}
 }
 
-__global__ void precompute_sin_coeffs(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> coefficients,
+__global__ void compute_sin_coeffs_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> coefficients,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> bias,
-		torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> output) {
+		torch::PackedTensorAccessor32<double, 2, torch::RestrictPtrTraits> output) {
 
 	/**
-	 * precompute the derivative of the features to save some time for the full derivative
+	 * precompute the derivative of the features to save some time for the full derivative, including negative due to F = -dE/dR
 	 *
 	 * **/
 
@@ -240,18 +240,18 @@ __global__ void precompute_sin_coeffs(const torch::PackedTensorAccessor32<float,
 
 	int iatom = blockIdx.x;
 
-	const float normf = sqrt(2.0 / float(nfeatures));
+	const double normf = sqrt(2.0 / double(nfeatures));
 
 	for (int N = threadIdx.x; N < nfeatures; N += blockDim.x) {
-		output[iatom][N] = -sin(coefficients[iatom][N] + bias[N]) * normf;
+		output[iatom][N] = sin((double) coefficients[iatom][N] + (double) bias[N]) * normf;
 	}
 }
 
-__global__ void compute_featurisation_derivative_float(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> cos_derivs,
-		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> ordering,
+__global__ void compute_featurisation_derivative_kernel(const torch::PackedTensorAccessor32<double, 2, torch::RestrictPtrTraits> cos_derivs,
+		const double normalisation, const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> ordering,
 		const torch::PackedTensorAccessor32<float, 4, torch::RestrictPtrTraits> input_derivative,
 		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> D, int nstacks, int log2N,
-		torch::PackedTensorAccessor32<float, 4, torch::RestrictPtrTraits> feature_derivatives) {
+		torch::PackedTensorAccessor32<double, 4, torch::RestrictPtrTraits> feature_derivatives) {
 
 	const int N = 1 << log2N;
 
@@ -273,7 +273,6 @@ __global__ void compute_featurisation_derivative_float(const torch::PackedTensor
 	int batchID = ordering[iatom];
 
 	const float normc = (1.0 / powf(2.0, float(log2N) / 2.0));
-	const float feature_norm = sqrt(2.0 / float(nfeatures));
 
 //printf("thread %d block %d iatom %d jatom %d batchID %d nstacks %d\n", threadIdx.x, blockIdx.x, iatom, jatom, batchID, nstacks);
 	for (int x = 0; x < 3; x++) {
@@ -370,22 +369,13 @@ __global__ void compute_featurisation_derivative_float(const torch::PackedTensor
 
 				int idx = stack * N + pos;
 
-				float val = cos_derivs[iatom][idx] * u[pos];
+				double val = normalisation * cos_derivs[iatom][idx] * (double) u[pos];
 
 				atomicAdd(&feature_derivatives[batchID][jatom][x][idx], val);
 
 			}
 		}
 	}
-}
-
-__global__ void predict_forces_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> cos_derivs,
-		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> ordering,
-		const torch::PackedTensorAccessor32<float, 4, torch::RestrictPtrTraits> input_derivative,
-		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> D, int nstacks, int log2N,
-		torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> forces) {
-
-//TODO
 }
 
 void hadamard_gpu(torch::Tensor input, torch::Tensor output) {
@@ -403,7 +393,7 @@ void hadamard_gpu(torch::Tensor input, torch::Tensor output) {
 	cudaDeviceSynchronize();
 }
 
-void compute_sorf_matrix_gpu_float(torch::Tensor representations, torch::Tensor scaling, torch::Tensor sorf_matrix) {
+void compute_sorf_matrix(torch::Tensor representations, torch::Tensor scaling, torch::Tensor sorf_matrix) {
 
 	int n = representations.size(1);
 	int log2N = int(log2(n));
@@ -419,48 +409,48 @@ void compute_sorf_matrix_gpu_float(torch::Tensor representations, torch::Tensor 
 
 	int nstacks = int(float(nfeatures) / n);
 
-	sorf_matrix_kernel_float<<<curBatchSize, (n+3)/4, n * sizeof(float)>>>(representations.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+	sorf_matrix_kernel<<<curBatchSize, (n+3)/4, n * sizeof(float)>>>(representations.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			scaling.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			sorf_matrix.packed_accessor32<float, 2, torch::RestrictPtrTraits>(), nstacks, log2N);
 
 	cudaDeviceSynchronize();
 }
 
-void compute_partial_feature_derivatives_gpu_float(torch::Tensor sorf_matrix, torch::Tensor bias, torch::Tensor sin_coeffs) {
+void compute_partial_feature_derivatives(torch::Tensor sorf_matrix, torch::Tensor bias, torch::Tensor sin_coeffs) {
 	int currBatchSize = sorf_matrix.size(0);
-	const int nthreads = 128;
+	const int nthreads = 64;
 
-	precompute_sin_coeffs<<<currBatchSize, nthreads>>>(
+	compute_sin_coeffs_kernel<<<currBatchSize, nthreads>>>(
 			sorf_matrix.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			bias.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
-			sin_coeffs.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+			sin_coeffs.packed_accessor32<double, 2, torch::RestrictPtrTraits>());
 
 	cudaDeviceSynchronize();
 
 }
 
-void compute_molecular_featurization_gpu_float(torch::Tensor sorf_matrix, torch::Tensor bias, torch::Tensor ordering, torch::Tensor features) {
+void compute_molecular_featurization(torch::Tensor sorf_matrix, torch::Tensor bias, torch::Tensor ordering, torch::Tensor features) {
 
 	int currBatchSize = sorf_matrix.size(0);
-	const int nthreads = 128;
+	const int nthreads = 64;
 
-	compute_featurisation_float<<<currBatchSize, nthreads>>>(
+	compute_featurisation_kernel<<<currBatchSize, nthreads>>>(
 			sorf_matrix.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			bias.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
 			ordering.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
-			features.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+			features.packed_accessor32<double, 2, torch::RestrictPtrTraits>());
 
 	cudaDeviceSynchronize();
 }
 
-void compute_molecular_featurization_derivative_gpu_float(torch::Tensor cos_derivs, torch::Tensor scaling, torch::Tensor input_derivatives,
+void compute_molecular_featurization_derivative(torch::Tensor cos_derivs, double normalisation, torch::Tensor scaling, torch::Tensor input_derivatives,
 		torch::Tensor ordering, torch::Tensor feature_derivatives) {
 
 	int n = input_derivatives.size(3);
 	int log2N = int(log2(n));
 
 	int currBatchSize = input_derivatives.size(0) * input_derivatives.size(1);
-//int currBatchSize = input_derivatives.size(0);
+
 	int nfeatures = cos_derivs.size(1);
 
 	int log2f = int(log2(nfeatures));
@@ -472,26 +462,14 @@ void compute_molecular_featurization_derivative_gpu_float(torch::Tensor cos_deri
 
 	int nthreads = (n + 3) / 4;
 
-	cudaEvent_t start, stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
-	cudaEventRecord(start);
+compute_featurisation_derivative_kernel<<<currBatchSize, nthreads, 2*n * sizeof(float)>>>(
+		cos_derivs.packed_accessor32<double, 2, torch::RestrictPtrTraits>(),
+		normalisation,
+		ordering.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+		input_derivatives.packed_accessor32<float, 4, torch::RestrictPtrTraits>(),
+		scaling.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+		nstacks, log2N,
+		feature_derivatives.packed_accessor32<double, 4, torch::RestrictPtrTraits>());
 
-	compute_featurisation_derivative_float<<<currBatchSize, nthreads, 2*n * sizeof(float)>>>(
-			cos_derivs.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
-			ordering.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
-			input_derivatives.packed_accessor32<float, 4, torch::RestrictPtrTraits>(),
-			scaling.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-			nstacks, log2N,
-			feature_derivatives.packed_accessor32<float, 4, torch::RestrictPtrTraits>());
-
-	cudaDeviceSynchronize();
-
-	cudaEventRecord(stop);
-	cudaEventSynchronize(stop);
-	float milliseconds = 0;
-	cudaEventElapsedTime(&milliseconds, start, stop);
-
-//cout << "c+++ derivatives call time: " << milliseconds << endl;
 }
 

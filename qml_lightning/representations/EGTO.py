@@ -194,13 +194,134 @@ def get_neighbours(distances, cutoff):
     return neighbors, neighbor_mask
 
 
+class Representation():
+    
+    def __init__(self):
+        pass
+    
+    def get_representation(self):
+        raise NotImplementedError("Abstract method only.")
+    
+    def get_representation_and_derivative(self):
+        raise NotImplementedError("Abstract method only.")
+
+
+class EGTOCuda(Representation):
+
+    def __init__(self, species=np.array([1, 6, 7, 8]), low_cutoff=0.0, high_cutoff=6.0, ngaussians=20, eta=2.0, lmax=2):
+        
+        super(EGTOCuda, self).__init__()
+        
+        self.species = torch.from_numpy(species).float().cuda()
+        
+        self.low_cutoff = low_cutoff
+        self.high_cutoff = high_cutoff
+        self.ngaussians = ngaussians
+        self.eta = eta
+        self.lmax = lmax
+        
+        self.generate_angular_numbers()
+        
+        self.offset = torch.linspace(0.0, self.high_cutoff, ngaussians + 1)[1:].cuda()
+    
+        mbody_list = torch.zeros(species.shape[0], species.shape[0], dtype=torch.int32)
+        
+        count = 0
+        
+        for i in range(species.shape[0]):
+            mbody_list[i][i] = count
+            count += 1
+            
+        for i in range(species.shape[0]):
+            for j in range(i + 1, species.shape[0]):
+                mbody_list[i][j] = count
+                mbody_list[j][i] = count
+                count += 1
+            
+        self.mbody_list = mbody_list.cuda()
+    
+    def get_representation(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor):
+  
+        nneighbours = pairlist_gpu2.get_num_neighbours_gpu2(X, atom_counts, self.high_cutoff)
+        
+        max_neighbours = nneighbours.max().item()
+     
+        neighbourlist = pairlist_gpu2.get_neighbour_list_gpu2(X, atom_counts, max_neighbours, self.high_cutoff)
+ 
+        element_types = egto_gpu2.get_element_types_gpu2(X, Z, atom_counts, self.species) 
+        
+        output = egto_gpu2.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+        self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.eta, self.lmax, self.high_cutoff,
+        False)
+        
+        return output[0]
+    
+    def get_representation_and_derivative(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor):
+        nneighbours = pairlist_gpu2.get_num_neighbours_gpu2(X, atom_counts, self.high_cutoff)
+        
+        max_neighbours = nneighbours.max().item()
+     
+        neighbourlist = pairlist_gpu2.get_neighbour_list_gpu2(X, atom_counts, max_neighbours, self.high_cutoff)
+        
+        element_types = egto_gpu2.get_element_types_gpu2(X, Z, atom_counts, self.species) 
+        
+        output = egto_gpu2.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+        self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.eta, self.lmax, self.high_cutoff,
+        True)
+        
+        return output[0], output[1]
+    
+    def rep_deriv_fd(self, X, Z, repsize, atomIDs, molIDs, natom_counts, dx=0.005):
+    
+        rep_derivative_fd = torch.zeros(X.shape[0], X.shape[1], X.shape[1], 3, repsize, dtype=torch.float64, device=X.device)
+        
+        for i in range(X.shape[1]):
+        
+            for x in range (3):
+                
+                X_copy = X.clone()
+                
+                X_copy[:, i, x] += dx
+                
+                gto_plus = self.get_representation(X_copy, Z, atomIDs, molIDs, natom_counts)
+      
+                X_copy[:, i, x] -= 2 * dx
+                
+                gto_minus = self.get_representation(X_copy, Z, atomIDs, molIDs, natom_counts)
+                
+                rep_derivative_fd[:,:, i, x,:] = (gto_plus - gto_minus) / (2 * dx)
+                
+        return rep_derivative_fd
+    
+    def generate_angular_numbers(self):
+        angular_components = []
+        angular_weights = []
+        angular_indexes = []
+        
+        for i in range(self.lmax + 1):
+            for k in range (i + 1):
+                for m in range(i - k + 1):
+                    n = i - k - m
+                    angular_components.append([n, m, k])
+                    angular_weights.append(np.math.factorial(i) / (np.math.factorial(n) * np.math.factorial(m) * np.math.factorial(k)))
+                    angular_indexes.append(i)
+                    
+        angular_components = torch.FloatTensor(angular_components)
+        angular_weights = torch.FloatTensor(angular_weights)
+        angular_indexes = torch.IntTensor(angular_indexes)
+        
+        self.orbital_components = angular_components.cuda()
+        self.orbital_weights = angular_weights.cuda()
+        self.orbital_indexes = angular_indexes.cuda()
+    
+    
 class ElementalGTO(nn.Module):
     
     ''' implementation of Elemental GTO for pytorch autograd support. At the moment only the pairlist is implemented directly as a cuda kernel,
         but might move more of this to cuda when I have time.
     '''
 
-    def __init__(self, species=[1, 6, 7, 8], low_cutoff=0.0, high_cutoff=6.0, n_gaussians=20, eta=2.3, Lmax=2, device=torch.device('cpu'), trainable_basis=False):
+    def __init__(self, species=[1, 6, 7, 8], low_cutoff=0.0, high_cutoff=6.0, n_gaussians=20, eta=2.3, Lmax=2, device=torch.device('cpu'), trainable_basis=True):
         
         super(ElementalGTO, self).__init__()
         self.device = device
@@ -241,7 +362,7 @@ class ElementalGTO(nn.Module):
         self.register_buffer("fingerprint_size", torch.FloatTensor(self.fp_size))
 
         if (trainable_basis):
-            self.inv_factor = nn.Parameter(torch.cuda.FloatTensor([2.0], device=device))
+            self.inv_factor = nn.Parameter(torch.full([n_gaussians], 2.0, device=device))
             self.width = nn.Parameter(widths)
             self.offsets = nn.Parameter(offset)
         else:
@@ -273,17 +394,20 @@ class ElementalGTO(nn.Module):
     
     def forward(self, coordinates, nuclear_charges):
         
+        print ("offsets:", self.offsets)
+        print ("widths:", self.width)
+        print ("inv_factor: ", self.inv_factor)
         n_batch, n_atoms, _ = coordinates.shape
 
-        num_neighbours = pairlist_gpu.get_num_neighbours_gpu(coordinates, self.high_cutoff)
+        num_neighbours = pairlist_gpu.get_num_neighbours_gpu(coordinates.float(), self.high_cutoff)
        
         max_neighbours = torch.max(num_neighbours)
 
-        neighbours = pairlist_gpu.get_neighbour_list_gpu(coordinates, max_neighbours.item(), self.high_cutoff)
+        neighbours = pairlist_gpu.get_neighbour_list_gpu(coordinates.float(), max_neighbours.item(), self.high_cutoff)
         
         pairlist_mask = (neighbours != -1)
 
-        # get rid of the -1's
+        # get rid of the -1's - picks a valid index and fills -1 values with that
         pairlist_gpu.safe_fill_gpu(neighbours)
         
         idx_m = torch.arange(coordinates.shape[0], dtype=torch.long)[:, None, None]
@@ -312,6 +436,10 @@ class ElementalGTO(nn.Module):
         # print (self.angular_indexes[None, None,:, None].shape)
         
         # inv_scaling = torch.pow(1.0 / distances[..., None, None], self.inv_factor[None, None, None, None,:] + self.angular_indexes[None, None,:, None]) * pairlist_coeffs[..., None, None]
+        
+        print (distances[..., None].shape)
+        print (self.angular_indexes.shape)
+        print (self.inv_factor.shape)
         
         inv_scaling = torch.pow(1.0 / distances[..., None], self.inv_factor + self.angular_indexes) * pairlist_coeffs[..., None]
         

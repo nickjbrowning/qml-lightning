@@ -52,6 +52,14 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
         extra_compile_args={'cxx': ['-g'],
                             'nvcc': ['-O2', '-ftz=true']})
     
+    rff_extension = CUDAExtension(
+        '.cuda.rff_gpu', [
+            'qml_lightning/cuda/random_features.cpp',
+            'qml_lightning/cuda/random_features_kernel.cu'
+        ],
+        extra_compile_args={'cxx': ['-g'],
+                            'nvcc': ['-O2', '-ftz=true']})
+    
     pairlist_extension = CUDAExtension(
         '.cuda.pairlist_gpu', [
             'qml_lightning/cuda/pairlist_cuda.cpp',
@@ -81,7 +89,8 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
     ext_modules.append(hd_extension)
     ext_modules.append(pairlist_extension)
     ext_modules.append(pairlist2_extension)
-    ext_modules.append(operator_extension)
+    # ext_modules.append(operator_extension)
+    ext_modules.append(rff_extension)
     
 else:
     print("ERROR: cuda not available, or CUDA_HOME not set.")
@@ -93,6 +102,7 @@ setup(
               'qml_lightning.features',
               'qml_lightning.representations',
               'qml_lightning.models',
+              'qml_lightning.models.neural_net',
               'qml_lightning.utils'],
     version=__version__,
     author=__author__,
