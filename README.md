@@ -2,7 +2,9 @@
 
 <img src="./images/qml_lightning.png" alt="drawing" width="400"/>
 
-GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning. This package includes both the Random Fourrier Feature method (cite: TODO), as well as Structured Orthogonal Random Features (cite: TODO). it additionally contains a highly efficient 3-body representation thats designed specifically to work well on GPUs.
+GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning. 
+
+This package includes both the Random Fourrier Feature method (cite: TODO), as well as Structured Orthogonal Random Features (cite: TODO). it additionally contains a highly efficient 3-body representation thats designed specifically to work well on GPUs.
 
 # Requirements
 
