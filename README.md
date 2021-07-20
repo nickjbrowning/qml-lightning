@@ -4,7 +4,7 @@
 
 GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning. 
 
-This package includes both the Random Fourrier Feature method (cite: TODO), as well as Structured Orthogonal Random Features (cite: TODO). it additionally contains a highly efficient 3-body representation thats designed specifically to work well on GPUs.
+This package includes both the Random Fourrier Features method (cite: TODO), as well as Structured Orthogonal Random Features (cite: TODO), referred to here as Hadamard Features. it additionally contains a highly efficient 3-body representation thats designed specifically to work well on GPUs.
 
 # Requirements
 
@@ -115,7 +115,7 @@ train_charges: [ndarray(5), ndarray(11), ndarray(21)]
 train_energies: [-1843, -1024, -765]
 train_forces: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
 ```
-The EGTOCuda is capable of building the atomic densities for multiple different types of molecules simultaneously, and this again is all hidden away!
+The EGTOCuda class is capable of building the atomic densities and derivatives for multiple different types of molecules simultaneously, and this again is all hidden away!
 
 # Caveats
 
