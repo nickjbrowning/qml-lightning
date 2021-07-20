@@ -43,7 +43,7 @@ Now you should be good to go!
 
 # Use
 
-Many examples of performing property learning for both random and Hadamard features can be found in the qml_lightning/tests folder. In this example we'll use the MD9 dataset (TODO: cite) with Hadamard features located here: `tests/hadamard_features/md9/train_single.py`
+Many examples of performing property learning for both random and Hadamard features can be found in the qml_lightning/tests folder. In this example we'll use the MD9 dataset (TODO: cite) with Hadamard features located here: `tests/random_features/hadamard_features/md9/train_single.py`
 
 First, download the MD9 dataset by typing the following command in the `tests/` folder
 
