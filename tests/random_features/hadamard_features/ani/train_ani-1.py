@@ -3,7 +3,6 @@ import numpy as np
 from tqdm import tqdm
 
 from qml_lightning.utils.ani1_dataloader import iter_data_buckets
-import qml_lightning.utils.pyanitools as pya
 import argparse
 
 from qml_lightning.models.hadamard_features import HadamardFeaturesModel
