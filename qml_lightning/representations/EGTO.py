@@ -100,7 +100,7 @@ class Representation():
 
 class EGTOCuda(Representation):
 
-    def __init__(self, species=np.array([1, 6, 7, 8]), low_cutoff=0.0, high_cutoff=6.0, ngaussians=20, eta=2.0, lmax=2, lchannel_weights=[1.0, 1.0, 1.0], inv_factors=[1.0, 1.0, 1.0]):
+    def __init__(self, species=np.array([1, 6, 7, 8]), low_cutoff=0.0, high_cutoff=6.0, ngaussians=20, eta=2.5, lmax=2, lchannel_weights=[1.0, 1.0, 1.0], inv_factors=[2.0, 2.0, 2.0]):
         
         super(EGTOCuda, self).__init__()
         
