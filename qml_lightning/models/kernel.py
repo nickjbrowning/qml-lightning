@@ -3,8 +3,8 @@ Created on 22 Jun 2021
 
 @author: Nicholas J. Browning
 '''
-import numpy as np
 import torch
+import numpy as np
 from qml_lightning.representations.dimensionality_reduction import project_representation, project_derivative
 from tqdm import tqdm
 

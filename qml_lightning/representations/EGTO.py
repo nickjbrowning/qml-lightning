@@ -7,10 +7,9 @@ Created on 1 Apr 2021
 @copyright: 
 
 '''
-
+import torch
 from qml_lightning.cuda import pairlist_gpu
 from qml_lightning.cuda import egto_gpu2
-import torch
 import numpy as np
 import torch.nn as nn
 

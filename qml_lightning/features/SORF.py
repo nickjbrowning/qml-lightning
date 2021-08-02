@@ -7,10 +7,9 @@ Created on 1 Apr 2021
 @copyright: 
 
 '''
-
+import torch
 import numpy as np
 from qml_lightning.cuda import sorf_gpu
-import torch
 
 
 class SORFTransformCuda(torch.autograd.Function):
