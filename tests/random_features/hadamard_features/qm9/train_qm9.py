@@ -11,14 +11,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument("-ntrain", type=int, default=1000)
-    parser.add_argument("-ntest", type=int, default=250)
+    parser.add_argument("-ntest", type=int, default=1000)
     parser.add_argument("-nreductor_samples", type=int, default=1000)
     parser.add_argument("-nbatch", type=int, default=64)
     
     '''model parameters'''
     parser.add_argument("-sigma", type=float, default=3.0)
     parser.add_argument("-llambda", type=float, default=1e-10)
-    parser.add_argument("-npcas", type=int, default=64)
+    parser.add_argument("-npcas", type=int, default=128)
+    parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nfeatures", type=int, default=8192)
     
     '''representation parameters'''
@@ -65,8 +66,8 @@ if __name__ == "__main__":
     
     coords = data['coordinates']
     nuclear_charges = data['charges']
-    # energies = np.array(data['H_atomization']) * 627.503
-    energies = np.array(data['Cv']) 
+    energies = np.array(data['H_atomization']) * 627.503
+    # energies = np.array(data['Cv']) 
     
     new_coords = []
     new_charges = []

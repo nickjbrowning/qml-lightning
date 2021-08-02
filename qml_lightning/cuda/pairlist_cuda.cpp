@@ -4,23 +4,28 @@
 using namespace at;
 using namespace std;
 
-void getNumNeighboursCUDA(torch::Tensor coordinates, torch::Tensor num_neighbours, float rcut);
-void getNeighbourListCUDA(torch::Tensor coordinates, torch::Tensor neighbour_list, float rcut);
+void getNumNeighboursCUDA(torch::Tensor coordinates, torch::Tensor natoms, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
+		torch::Tensor num_neighbours);
+
+void getNeighbourListCUDA(torch::Tensor coordinates, torch::Tensor natoms, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
+		torch::Tensor neighbour_list);
+
 void safeFillCUDA(torch::Tensor pairlist);
 
-torch::Tensor get_num_neighbours_gpu(torch::Tensor coordinates, float rcut) {
+torch::Tensor get_num_neighbours_gpu(torch::Tensor coordinates, torch::Tensor natoms, float rcut,
+		torch::Tensor lattice_vecs = torch::empty( { 0, 3, 3 }, torch::kCUDA), torch::Tensor inv_lattice_vecs = torch::empty( { 0, 3, 3 }, torch::kCUDA)) {
 
 	TORCH_CHECK(coordinates.device().type() == torch::kCUDA, "coordinates must be a CUDA tensor");
 
 	int nbatch = coordinates.size(0);
 
-	int natoms = coordinates.size(1);
+	int max_natoms = natoms.max().item<int>();
 
 	auto options = torch::TensorOptions().dtype(torch::kInt32).layout(torch::kStrided).device(torch::kCUDA);
 
-	torch::Tensor num_neighbours = torch::zeros( { nbatch, natoms }, options);
+	torch::Tensor num_neighbours = torch::zeros( { nbatch, max_natoms }, options);
 
-	getNumNeighboursCUDA(coordinates, num_neighbours, rcut);
+	getNumNeighboursCUDA(coordinates, natoms, rcut, lattice_vecs, inv_lattice_vecs, num_neighbours);
 
 	return num_neighbours;
 }
@@ -33,21 +38,22 @@ void safe_fill_gpu(torch::Tensor pairlist) {
 	safeFillCUDA(pairlist);
 }
 
-torch::Tensor get_neighbour_list_gpu(torch::Tensor coordinates, int max_neighbours, float rcut) {
+torch::Tensor get_neighbour_list_gpu(torch::Tensor coordinates, torch::Tensor natoms, int max_neighbours, float rcut,
+		torch::Tensor lattice_vecs = torch::empty( { 0, 3, 3 }, torch::kCUDA), torch::Tensor inv_lattice_vecs = torch::empty( { 0, 3, 3 }, torch::kCUDA)) {
 
 	TORCH_CHECK(coordinates.device().type() == torch::kCUDA, "coordinates must be a CUDA tensor");
 
 	int nbatch = coordinates.size(0);
 
-	int natoms = coordinates.size(1);
+	int max_natoms = natoms.max().item<int>();
 
 	auto options = torch::TensorOptions().dtype(torch::kInt32).layout(torch::kStrided).device(torch::kCUDA);
 
-	torch::Tensor nbh_list = torch::zeros( { nbatch, natoms, max_neighbours }, options);
+	torch::Tensor nbh_list = torch::zeros( { nbatch, max_natoms, max_neighbours }, options);
 
 	nbh_list.fill_(-1);
 
-	getNeighbourListCUDA(coordinates, nbh_list, rcut);
+	getNeighbourListCUDA(coordinates, natoms, rcut, lattice_vecs, inv_lattice_vecs, nbh_list);
 
 	return nbh_list;
 }

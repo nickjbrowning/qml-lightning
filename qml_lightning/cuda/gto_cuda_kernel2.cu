@@ -6,6 +6,37 @@ using namespace std;
 
 #define FULL_MASK 0xffffffff
 
+__device__ void get_pbc_dij(float *drij, float *cell_vectors, float *inv_cell_vectors) {
+
+	/*
+	 *   h := [a, b, c], a=(a1,a2,a3), ... (the matrix of box vectors)
+	 r_ij := r_i - r_j                 (difference vector)
+
+	 s_i = h^{-1} r_i
+	 s_ij = s_i - s_j
+	 s_ij <-- s_ij - NINT(s_ij)        (general minimum image convention)
+	 r_ij = h s_ij
+	 */
+
+	for (int x = 0; x < 3; x++) {
+
+		float sij_x = 0.0;
+		float rij_x = 0.0;
+
+		for (int y = 0; y < 3; y++) {
+			sij_x += inv_cell_vectors[x * 3 + y] * drij[x];
+		}
+
+		sij_x = sij_x - round(sij_x);
+
+		for (int y = 0; y < 3; y++) {
+			rij_x += cell_vectors[x * 3 + y] * sij_x;
+		}
+
+		drij[x] = rij_x;
+	}
+}
+
 __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
@@ -18,7 +49,11 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> gto_components,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> orbital_weights,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> gto_powers,
-		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> gridpoints, float eta, int lmax, float rcut,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> gridpoints,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> lchannel_weights,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> inv_factors, float eta, int lmax, float rcut,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> cell,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> inv_cell,
 		torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output) {
 
 	extern __shared__ int s[];
@@ -35,12 +70,7 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 	int lrepsize = nmbody * (lmax + 1) * ngauss;
 
 	/*Shared Memory Definitions*/
-	float *scoordinates_x = (float*) &s; //max_neighbours
-	float *scoordinates_y = (float*) &scoordinates_x[max_neighbours]; //max_neighbours
-	float *scoordinates_z = (float*) &scoordinates_y[max_neighbours]; //max_neighbours
-	float *scharges = (float*) &scoordinates_z[max_neighbours]; //max_neighbours
-	int *selement_types = (int*) &scharges[max_neighbours]; //maxatoms
-	float *sgridpoints = (float*) &selement_types[max_neighbours]; //ngaussians
+	float *sgridpoints = (float*) &s; //ngaussians
 	int *smbodylist = (int*) &sgridpoints[ngauss]; //nspecies * nspecies
 	float *sgto_components_x = (float*) &smbodylist[nspecies * nspecies]; //norbs
 	float *sgto_components_y = (float*) &sgto_components_x[norbs]; //norbs
@@ -50,6 +80,9 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 
 	float *norb_temporary = (float*) &sorbital_weights[norbs]; //[norbs x nmbody x ngauss]
 	float *lmax_temporary = (float*) &norb_temporary[nmbody * ngauss * norbs]; //[(lmax+1) x nmbody x ngauss]
+
+	float *slattice_vecs = (float*) &lmax_temporary[(lmax + 1) * nmbody * ngauss];
+	float *sinv_lattice_vecs = (float*) &slattice_vecs[9];
 	/*Shared Memory Definitions*/
 
 	int molID = blockMolIDs[blockIdx.x];
@@ -62,14 +95,18 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 
 	double sqrt_eta = sqrt(eta / M_PI);
 
-	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
-		int j = neighbourlist[molID][iatom][jatom];
+	bool pbc = false;
 
-		scoordinates_x[jatom] = coordinates[molID][j][0];
-		scoordinates_y[jatom] = coordinates[molID][j][1];
-		scoordinates_z[jatom] = coordinates[molID][j][2];
-		scharges[jatom] = charges[molID][j];
-		selement_types[jatom] = element_types[molID][j];
+	if (cell.size(0) > 0) {
+
+		pbc = true;
+
+		if (threadIdx.x < 3) {
+			for (int j = 0; j < 3; j++) {
+				slattice_vecs[threadIdx.x * 3 + j] = cell[molID][threadIdx.x][j];
+				sinv_lattice_vecs[threadIdx.x * 3 + j] = inv_cell[molID][threadIdx.x][j];
+			}
+		}
 	}
 
 	__syncthreads();
@@ -89,6 +126,7 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 	for (int i = threadIdx.x; i < ngauss; i += blockDim.x) {
 		sgridpoints[i] = gridpoints[i];
 	}
+
 	__syncthreads();
 
 	if (threadIdx.x == 0) {
@@ -96,44 +134,47 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 			for (int k = j; k < nspecies; k++) {
 				smbodylist[j * nspecies + k] = mbodylist[j][k];
 				smbodylist[k * nspecies + j] = mbodylist[k][j];
+
 			}
 		}
 	}
 
 	__syncthreads();
 
-// zero out shared data storage
 	for (int i = threadIdx.x; i < krepsize; i += blockDim.x) {
 		norb_temporary[i] = 0.0;
 
-		if (i < lrepsize) {
-			lmax_temporary[i] = 0.0;
-		}
 	}
 
 	__syncthreads();
 
+	for (int i = threadIdx.x; i < lrepsize; i += blockDim.x) {
+		lmax_temporary[i] = 0.0;
+	}
+
+	__syncthreads();
+
+	float drij[3];
+
 //save norb,ngaussian points into shared memory
 	for (int jatom = 0; jatom < nneighbours_i; jatom++) {
 
-		//if (iatom == jatom) - shouldn't occur since neighbourlist accounts for this
-		//	continue;
+		int j = neighbourlist[molID][iatom][jatom];
 
-		int element_type = selement_types[jatom];
+		float rjx = coordinates[molID][j][0];
+		float rjy = coordinates[molID][j][1];
+		float rjz = coordinates[molID][j][2];
+		int element_type = element_types[molID][j];
 
-		float rjx = scoordinates_x[jatom];
-		float rjy = scoordinates_y[jatom];
-		float rjz = scoordinates_z[jatom];
+		drij[0] = rix - rjx;
+		drij[1] = riy - rjy;
+		drij[2] = riz - rjz;
 
-		float rijx = rix - rjx;
-		float rijy = riy - rjy;
-		float rijz = riz - rjz;
+		if (pbc) {
+			get_pbc_dij(drij, slattice_vecs, sinv_lattice_vecs);
+		}
 
-		float rij = sqrt(rijx * rijx + rijy * rijy + rijz * rijz);
-
-		//if (rij > rcut) { // shouldn't occur due to neighbourlist
-		///	continue;
-		//}
+		float rij = sqrt(drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2]);
 
 		float cut = 0.5 * (cos(rij * M_PI / rcut) + 1.0);
 
@@ -148,19 +189,19 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 			float gto_component_y = sgto_components_y[korb];
 			float gto_component_z = sgto_components_z[korb];
 
-			float ang = pow(rijx, gto_component_x) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
+			float ang = pow(drij[0], gto_component_x) * pow(drij[1], gto_component_y) * pow(drij[2], gto_component_z);
 
-			float val = sqrt_eta * (1.0 / pow(rij, 2.0 + gto_power)) * ang * cut;
+			float val = sqrt_eta * (1.0 / pow(rij, inv_factors[gto_power] + gto_power)) * ang * cut;
 
 			float gval = exp(-eta * pow(rij - sgridpoints[z], 2.0)) * val;
 
 			for (int m = 0; m < nspecies; m++) {
 
-				int ej = smbodylist[element_type * nspecies + m];
+				int ej = mbodylist[element_type][m];
 
 				int kidx = korb * nmbody * ngauss + ej * ngauss + z;
 
-				norb_temporary[kidx] += gval;
+				atomicAdd(&norb_temporary[kidx], gval);
 			}
 		}
 	}
@@ -189,7 +230,7 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 				float val = norb_temporary[kmn];
 
 				//atomic needed here as multiple korb can hit the same L channel
-				atomicAdd(&lmax_temporary[lmn], sorbital_weights[korb] * val * val);
+				atomicAdd(&lmax_temporary[lmn], lchannel_weights[lchannel] * sorbital_weights[korb] * val * val);
 			}
 		}
 	}
@@ -241,7 +282,11 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> gto_components,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> orbital_weights,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> gto_powers,
-		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> gridpoints, float eta, int lmax, float rcut,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> gridpoints,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> lchannel_weights,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> inv_factors, float eta, int lmax, float rcut,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> cell,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> inv_cell,
 		torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output, torch::PackedTensorAccessor32<float, 5, torch::RestrictPtrTraits> grad) {
 
 	extern __shared__ int s[];
@@ -256,12 +301,7 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 	int lrepsize = nmbody * (lmax + 1) * ngauss;
 
 	/*Shared Memory Definitions*/
-	float *scoordinates_x = (float*) &s; //max_neighbours
-	float *scoordinates_y = (float*) &scoordinates_x[max_neighbours]; //max_neighbours
-	float *scoordinates_z = (float*) &scoordinates_y[max_neighbours]; //max_neighbours
-	float *scharges = (float*) &scoordinates_z[max_neighbours]; //max_neighbours
-	int *selement_types = (int*) &scharges[max_neighbours]; //max_neighbours
-	float *sgridpoints = (float*) &selement_types[max_neighbours]; //ngaussians
+	float *sgridpoints = (float*) &s; //ngaussians
 	int *smbodylist = (int*) &sgridpoints[ngauss]; //nspecies * nspecies
 	float *sgto_components_x = (float*) &smbodylist[nspecies * nspecies]; //norbs
 	float *sgto_components_y = (float*) &sgto_components_x[norbs]; //norbs
@@ -275,6 +315,9 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 	float *norb_deriv_temporary = (float*) &lmax_temporary[nmbody * ngauss * (lmax + 1)]; //[norbs x nmbody x ngauss]
 	float *lmax_deriv_temporary = (float*) &norb_deriv_temporary[nmbody * ngauss * norbs]; //[(lmax+1) x nmbody x ngauss]
 
+	float *slattice_vecs = (float*) &lmax_deriv_temporary[(lmax + 1) * nmbody * ngauss];
+	float *sinv_lattice_vecs = (float*) &slattice_vecs[9];
+
 	/*Shared Memory Definitions*/
 
 	int molID = blockMolIDs[blockIdx.x];
@@ -285,15 +328,18 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 	float riy = coordinates[molID][iatom][1];
 	float riz = coordinates[molID][iatom][2];
 
-	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
+	bool pbc = false;
 
-		int j = neighbourlist[molID][iatom][jatom];
+	if (cell.size(0) > 0) {
 
-		scoordinates_x[jatom] = coordinates[molID][j][0];
-		scoordinates_y[jatom] = coordinates[molID][j][1];
-		scoordinates_z[jatom] = coordinates[molID][j][2];
-		scharges[jatom] = charges[molID][j];
-		selement_types[jatom] = element_types[molID][j];
+		pbc = true;
+
+		if (threadIdx.x < 3) {
+			for (int j = 0; j < 3; j++) {
+				slattice_vecs[threadIdx.x * 3 + j] = cell[molID][threadIdx.x][j];
+				sinv_lattice_vecs[threadIdx.x * 3 + j] = inv_cell[molID][threadIdx.x][j];
+			}
+		}
 	}
 
 	__syncthreads();
@@ -337,32 +383,32 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 		}
 	}
 
-	double sqrt_eta = sqrt(eta / M_PI);
-
 	__syncthreads();
+
+	double sqrt_eta = sqrt(eta / M_PI);
 
 //need to generate the representation partially first.
 
+	float drij[3];
+
 	for (int jatom = 0; jatom < nneighbours_i; jatom++) {
 
-		//if (iatom == jatom)
-		//	continue;
+		int j = neighbourlist[molID][iatom][jatom];
 
-		int element_type = selement_types[jatom];
+		float rjx = coordinates[molID][j][0];
+		float rjy = coordinates[molID][j][1];
+		float rjz = coordinates[molID][j][2];
+		int element_type = element_types[molID][j];
 
-		float rjx = scoordinates_x[jatom];
-		float rjy = scoordinates_y[jatom];
-		float rjz = scoordinates_z[jatom];
+		drij[0] = rix - rjx;
+		drij[1] = riy - rjy;
+		drij[2] = riz - rjz;
 
-		float rijx = rix - rjx;
-		float rijy = riy - rjy;
-		float rijz = riz - rjz;
-
-		float rij = sqrt(rijx * rijx + rijy * rijy + rijz * rijz);
-
-		if (rij > rcut) {
-			continue;
+		if (pbc) {
+			get_pbc_dij(drij, slattice_vecs, sinv_lattice_vecs);
 		}
+
+		float rij = sqrt(drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2]);
 
 		float cut = 0.5 * (cos(rij * M_PI / rcut) + 1.0);
 
@@ -377,9 +423,9 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 			float gto_component_y = sgto_components_y[korb];
 			float gto_component_z = sgto_components_z[korb];
 
-			float ang = pow(rijx, gto_component_x) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
+			float ang = pow(drij[0], gto_component_x) * pow(drij[1], gto_component_y) * pow(drij[2], gto_component_z);
 
-			float val = sqrt_eta * (1.0 / pow(rij, 2.0 + gto_power)) * ang * cut;
+			float val = sqrt_eta * (1.0 / pow(rij, inv_factors[gto_power] + gto_power)) * ang * cut;
 
 			float gval = exp(-eta * pow(rij - sgridpoints[z], 2.0)) * val;
 
@@ -400,30 +446,20 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 
 		int j = neighbourlist[molID][iatom][jatom];
 
-		//if (iatom == jatom)
-		//	continue;
+		float rjx = coordinates[molID][j][0];
+		float rjy = coordinates[molID][j][1];
+		float rjz = coordinates[molID][j][2];
+		int element_type = element_types[molID][j];
 
-		int element_type = selement_types[jatom];
+		drij[0] = rix - rjx;
+		drij[1] = riy - rjy;
+		drij[2] = riz - rjz;
 
-		float rjx = scoordinates_x[jatom];
-		float rjy = scoordinates_y[jatom];
-		float rjz = scoordinates_z[jatom];
-
-		float rijx = rix - rjx;
-		float rijy = riy - rjy;
-		float rijz = riz - rjz;
-
-		float drij[3];
-
-		drij[0] = rijx;
-		drij[1] = rijy;
-		drij[2] = rijz;
-
-		float rij = sqrt(rijx * rijx + rijy * rijy + rijz * rijz);
-
-		if (rij > rcut) {
-			continue;
+		if (pbc) {
+			get_pbc_dij(drij, slattice_vecs, sinv_lattice_vecs);
 		}
+
+		float rij = sqrt(drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2]);
 
 		float cut = 0.5 * (cos(rij * M_PI / rcut) + 1.0);
 		float dcut = -0.5 * (sin(rij * M_PI / rcut)) * M_PI / rcut;
@@ -454,10 +490,10 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 				float gto_component_y = sgto_components_y[korb];
 				float gto_component_z = sgto_components_z[korb];
 
-				float rscaling = (1.0 / pow(rij, 2.0 + gto_power));
-				float drscaling = -(2.0 + float(gto_power)) * (1.0 / pow(rij, 3.0 + float(gto_power)));
+				float rscaling = (1.0 / pow(rij, inv_factors[gto_power] + gto_power));
+				float drscaling = -(inv_factors[gto_power] + float(gto_power)) * (1.0 / pow(rij, 1.0 + inv_factors[gto_power] + float(gto_power)));
 
-				float ang = pow(rijx, gto_component_x) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
+				float ang = pow(drij[0], gto_component_x) * pow(drij[1], gto_component_y) * pow(drij[2], gto_component_z);
 
 				float dang[3];
 
@@ -468,21 +504,21 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 				//TODO need to make the following more efficient
 				if (x == 0) {
 					if (gto_component_x == 1.0) {
-						dang[0] = -1.0 * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
+						dang[0] = -1.0 * pow(drij[1], gto_component_y) * pow(drij[2], gto_component_z);
 					} else if (gto_component_x > 1.0) {
-						dang[0] = -gto_component_x * pow(rijx, gto_component_x - 1.0) * pow(rijy, gto_component_y) * pow(rijz, gto_component_z);
+						dang[0] = -gto_component_x * pow(drij[0], gto_component_x - 1.0) * pow(drij[1], gto_component_y) * pow(drij[2], gto_component_z);
 					}
 				} else if (x == 1) {
 					if (gto_component_y == 1.0) {
-						dang[1] = -1.0 * pow(rijx, gto_component_x) * pow(rijz, gto_component_z);
+						dang[1] = -1.0 * pow(drij[0], gto_component_x) * pow(drij[2], gto_component_z);
 					} else if (gto_component_y > 1.0) {
-						dang[1] = -gto_component_y * pow(rijy, gto_component_y - 1.0) * pow(rijx, gto_component_x) * pow(rijz, gto_component_z);
+						dang[1] = -gto_component_y * pow(drij[1], gto_component_y - 1.0) * pow(drij[0], gto_component_x) * pow(drij[2], gto_component_z);
 					}
 				} else {
 					if (gto_component_z == 1.0) {
-						dang[2] = -1.0 * pow(rijx, gto_component_x) * pow(rijy, gto_component_y);
+						dang[2] = -1.0 * pow(drij[0], gto_component_x) * pow(drij[1], gto_component_y);
 					} else if (gto_component_z > 1.0) {
-						dang[2] = -gto_component_z * pow(rijz, gto_component_z - 1.0) * pow(rijx, gto_component_x) * pow(rijy, gto_component_y);
+						dang[2] = -gto_component_z * pow(drij[2], gto_component_z - 1.0) * pow(drij[0], gto_component_x) * pow(drij[1], gto_component_y);
 					}
 				}
 
@@ -530,7 +566,7 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 						float val = norb_temporary[kmn];
 						float val_deriv = norb_deriv_temporary[kmn];
 
-						atomicAdd(&lmax_deriv_temporary[lmn], sorbital_weights[korb] * 2.0 * val * val_deriv);
+						atomicAdd(&lmax_deriv_temporary[lmn], lchannel_weights[lchannel] * sorbital_weights[korb] * 2.0 * val * val_deriv);
 					}
 				}
 			}
@@ -597,7 +633,7 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 
 				float val = norb_temporary[kmn];
 
-				atomicAdd(&lmax_temporary[lmn], sorbital_weights[korb] * val * val);
+				atomicAdd(&lmax_temporary[lmn], lchannel_weights[lchannel] * sorbital_weights[korb] * val * val);
 			}
 		}
 	}
@@ -667,7 +703,7 @@ void get_element_types_kernel(const torch::PackedTensorAccessor32<float, 3, torc
 void getElementTypesCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natom_counts, torch::Tensor species, torch::Tensor element_types) {
 
 	int nbatch = coordinates.size(0);
-	const int nthreads = 64;
+	const int nthreads = 32;
 
 	get_element_types_kernel<<<nbatch, nthreads>>>(coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
@@ -681,11 +717,8 @@ void getElementTypesCuda(torch::Tensor coordinates, torch::Tensor charges, torch
 
 void EGTOCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
-		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, float eta, int lmax, float rcut, torch::Tensor gto_output) {
-
-	cudaEvent_t start, stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
+		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factors, float eta,
+		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output) {
 
 	const int nthreads = 64;
 
@@ -698,9 +731,11 @@ void EGTOCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 	const int currBatch = blockAtomIDs.size(0);
 	const int max_neighbours = nneighbours.max().item<int>();
 
-	int shared_mem_size = 5 * max_neighbours + 2 * nspecies + ngaussians + 5 * norbs + (norbs * nmbody * ngaussians) + (lmax + 1) * nmbody * ngaussians;
+	//printf("nblocks: %d, Max neighbours: %d norbs: %d, nmbody: %d ngaussians: %d\n", currBatch, max_neighbours, norbs, nmbody, ngaussians);
 
-	cudaEventRecord(start);
+	int shared_mem_size = 2 * nspecies + ngaussians + 5 * norbs + (norbs * nmbody * ngaussians) + (lmax + 1) * nmbody * ngaussians + 18;
+
+	//printf("Shared mem requested: %d bytes\n", shared_mem_size);
 	egto_atomic_representation_cuda<<<currBatch, nthreads, shared_mem_size * sizeof(float)>>>(
 			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
@@ -715,25 +750,22 @@ void EGTOCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 			gto_components.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			orbital_weights.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
 			gto_powers.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
-			gridpoints.packed_accessor32<float, 1, torch::RestrictPtrTraits>(), eta, lmax,
-			rcut, gto_output.packed_accessor32<float, 3, torch::RestrictPtrTraits>());
-	cudaEventRecord(stop);
-	cudaDeviceSynchronize();
-	cudaEventSynchronize(stop);
+			gridpoints.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			lchannel_weights.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			inv_factors.packed_accessor32<float, 1, torch::RestrictPtrTraits>(), eta, lmax,
+			rcut,
+			cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			gto_output.packed_accessor32<float, 3, torch::RestrictPtrTraits>());
 
-	float milliseconds = 0;
-	cudaEventElapsedTime(&milliseconds, start, stop);
-	//printf("elemental gto rep time: %f\n", milliseconds);
+	cudaDeviceSynchronize();
+
 }
 
 void EGTODerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
-		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, float eta, int lmax, float rcut, torch::Tensor gto_output,
-		torch::Tensor gto_output_derivative) {
-
-	cudaEvent_t start, stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
+		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factors, float eta,
+		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output, torch::Tensor gto_output_derivative) {
 
 	const int nthreads = 64;
 
@@ -746,9 +778,8 @@ void EGTODerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch:
 	const int currBatch = blockAtomIDs.size(0);
 	const int max_neighbours = nneighbours.max().item<int>();
 
-	int shared_mem_size = 5 * max_neighbours + 2 * nspecies + ngaussians + 5 * norbs + 2 * ((norbs * nmbody * ngaussians) + (lmax + 1) * nmbody * ngaussians);
+	int shared_mem_size = 2 * nspecies + ngaussians + 5 * norbs + 2 * ((norbs * nmbody * ngaussians) + (lmax + 1) * nmbody * ngaussians) + 18;
 
-	cudaEventRecord(start);
 	egto_atomic_representation_derivative_cuda<<<currBatch, nthreads, shared_mem_size * sizeof(float)>>>(
 			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
@@ -763,15 +794,14 @@ void EGTODerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch:
 			gto_components.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			orbital_weights.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
 			gto_powers.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
-			gridpoints.packed_accessor32<float, 1, torch::RestrictPtrTraits>(), eta, lmax,
-			rcut, gto_output.packed_accessor32<float, 3, torch::RestrictPtrTraits>(), gto_output_derivative.packed_accessor32<float, 5, torch::RestrictPtrTraits>());
+			gridpoints.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			lchannel_weights.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			inv_factors.packed_accessor32<float, 1, torch::RestrictPtrTraits>(), eta, lmax,
+			rcut, cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			gto_output.packed_accessor32<float, 3, torch::RestrictPtrTraits>(), gto_output_derivative.packed_accessor32<float, 5, torch::RestrictPtrTraits>());
 
-	cudaEventRecord(stop);
 	cudaDeviceSynchronize();
-	cudaEventSynchronize(stop);
 
-	float milliseconds = 0;
-	cudaEventElapsedTime(&milliseconds, start, stop);
-	//printf("ngto rep + derivative time: %f\n", milliseconds);
 }
 

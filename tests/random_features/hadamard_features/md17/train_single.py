@@ -17,14 +17,14 @@ if __name__ == "__main__":
     parser.add_argument("-data", type=str, default='../../../data/aspirin_dft.npz')
     
     '''model parameters'''
-    parser.add_argument("-sigma", type=float, default=3.0)
-    parser.add_argument("-llambda", type=float, default=1e-10)
+    parser.add_argument("-sigma", type=float, default=2.0)
+    parser.add_argument("-llambda", type=float, default=1e-12)
     parser.add_argument("-npcas", type=int, default=128)
     parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nfeatures", type=int, default=8192)
     
     '''representation parameters'''
-    parser.add_argument("-eta", type=float, default=2.0)
+    parser.add_argument("-eta", type=float, default=2.6)
     parser.add_argument("-rcut", type=float, default=6.0)
     parser.add_argument("-lmax", type=int, default=2)
     parser.add_argument("-ngaussians", type=int, default=20)
@@ -99,7 +99,9 @@ if __name__ == "__main__":
     test_energies = [energies[i] for i in test_indexes]
     test_forces = [forces[i] for i in test_indexes]
 
-    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax)
+    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[1.0, 1.0, 1.0])
+    
+    # rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[0.5, 1.3, 1.0])
 
     model = HadamardFeaturesModel(rep, elements=unique_z, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
                                 nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)

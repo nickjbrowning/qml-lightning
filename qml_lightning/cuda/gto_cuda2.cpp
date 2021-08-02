@@ -8,12 +8,13 @@ void getElementTypesCuda(torch::Tensor coordinates, torch::Tensor charges, torch
 
 void EGTOCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
-		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, float eta, int lmax, float rcut, torch::Tensor gto_output);
+		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
+		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output);
 
 void EGTODerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
-		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, float eta, int lmax, float rcut, torch::Tensor gto_output,
-		torch::Tensor gto_output_derivative);
+		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
+		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output, torch::Tensor gto_output_derivative);
 
 torch::Tensor get_element_types_gpu(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natom_counts, torch::Tensor species) {
 
@@ -44,8 +45,8 @@ torch::Tensor get_element_types_gpu(torch::Tensor coordinates, torch::Tensor cha
 
 std::vector<torch::Tensor> get_egto(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
 		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist,
-		torch::Tensor gto_components, torch::Tensor orbital_weights, torch::Tensor gto_powers, torch::Tensor gridpoints, float eta, int lmax, float rcut,
-		bool gradients) {
+		torch::Tensor gto_components, torch::Tensor orbital_weights, torch::Tensor gto_powers, torch::Tensor gridpoints, torch::Tensor lchannel_weights,
+		torch::Tensor inv_factor, float eta, int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, bool gradients) {
 
 	/** ElementalGTO representation GPU wrapper
 	 *
@@ -59,6 +60,8 @@ std::vector<torch::Tensor> get_egto(torch::Tensor coordinates, torch::Tensor cha
 	 * gridpoints: [ngaussians]
 	 *
 	 * **/
+
+	TORCH_CHECK(lchannel_weights.device().type() == torch::kCUDA, "coordinates must be a CUDA tensor");
 
 	TORCH_CHECK(coordinates.device().type() == torch::kCUDA, "coordinates must be a CUDA tensor");
 
@@ -86,7 +89,7 @@ std::vector<torch::Tensor> get_egto(torch::Tensor coordinates, torch::Tensor cha
 
 	int ngaussians = gridpoints.size(0);
 
-	int nmbody = int(float((nspecies + 1) / 2.0) * nspecies);
+	int nmbody = int((float(nspecies + 1.0) / 2.0) * nspecies);
 	int repsize = nmbody * (lmax + 1) * ngaussians;
 
 	if (coordinates.dim() == 2) { // pad a dimension so elementalGTOGPUSharedMem still works
@@ -106,7 +109,7 @@ std::vector<torch::Tensor> get_egto(torch::Tensor coordinates, torch::Tensor cha
 		torch::Tensor gto_output_derivative = torch::zeros( { nbatch, natoms, natoms, 3, repsize }, options);
 
 		EGTODerivativeCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, mbodylist, gto_components,
-				gto_powers, orbital_weights, gridpoints, eta, lmax, rcut, gto_output, gto_output_derivative);
+				gto_powers, orbital_weights, gridpoints, lchannel_weights, inv_factor, eta, lmax, rcut, cell, inv_cell, gto_output, gto_output_derivative);
 
 		return {gto_output, gto_output_derivative};
 	} else {
@@ -114,7 +117,7 @@ std::vector<torch::Tensor> get_egto(torch::Tensor coordinates, torch::Tensor cha
 		torch::Tensor gto_output = torch::zeros( { nbatch, natoms, repsize }, options);
 
 		EGTOCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, mbodylist, gto_components, gto_powers,
-				orbital_weights, gridpoints, eta, lmax, rcut, gto_output);
+				orbital_weights, gridpoints, lchannel_weights, inv_factor, eta, lmax, rcut, cell, inv_cell, gto_output);
 
 		return {gto_output};
 	}

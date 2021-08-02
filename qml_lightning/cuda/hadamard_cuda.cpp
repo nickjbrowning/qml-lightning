@@ -49,7 +49,7 @@ void compute_hadamard_features(torch::Tensor sorf_matrix, torch::Tensor bias, to
 	compute_molecular_featurization(sorf_matrix, bias, ordering, features);
 }
 
-torch::Tensor compute_hadamard_derivative_features(torch::Tensor sorf_matrix, double normalisation, torch::Tensor bias, torch::Tensor scaling,
+void compute_hadamard_derivative_features(torch::Tensor sorf_matrix, double normalisation, torch::Tensor bias, torch::Tensor scaling,
 		torch::Tensor input_derivatives, torch::Tensor ordering, torch::Tensor feature_derivatives) {
 
 	//TORCH_CHECK(sorf_matrix.device().type() == torch::kCUDA, "sorf_matrix must be a CUDA tensor");

@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from qml_lightning.utils.ani_dataloader import iter_data_buckets
+from qml_lightning.utils.ani1x_dataloader import iter_data_buckets
 import argparse
 
 from qml_lightning.models.hadamard_features import HadamardFeaturesModel
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     # model.calculate_self_energy(train_charges, train_energies)
     model.self_energy = torch.Tensor([0., -0.600952980000, 0., 0., 0., 0., -38.08316124000, -54.70775770000, -75.19446356000, 0]).double() * 627.503
     
-    model.get_reductors([Xs[i] for i in reductor_samples], [Zs[i]for i in reductor_samples])
+    model.get_reductors([Xs[i] for i in reductor_samples], [Zs[i]for i in reductor_samples], npcas=npcas)
     
     model.train(train_coordinates, train_charges, train_energies, train_forces if use_forces else None)
     

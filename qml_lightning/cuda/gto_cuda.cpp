@@ -145,6 +145,11 @@ std::vector<torch::Tensor> elemental_gto_gpu_shared(torch::Tensor coordinates, t
 	}
 }
 
+int main() {
+	torch::Tensor tensor = torch::rand( { 2, 3 });
+	std::cout << tensor << std::endl;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
 	m.def("elemental_gto_gpu_shared", &elemental_gto_gpu_shared, "Elemental GTO Representation in Shared Memory");

@@ -219,10 +219,10 @@ __global__ void compute_featurisation_kernel(const torch::PackedTensorAccessor32
 
 	int batchID = ordering[iatom];
 
-	const double normf = sqrt(2.0 / double(nfeatures));
+	const float normf = sqrt(2.0 / float(nfeatures));
 
 	for (int N = threadIdx.x; N < nfeatures; N += blockDim.x) {
-		atomicAdd(&features[batchID][N], cos((double) coefficients[iatom][N] + (double) bias[N]) * normf);
+		atomicAdd(&features[batchID][N], cosf(coefficients[iatom][N] + bias[N]) * normf);
 	}
 }
 
@@ -240,10 +240,10 @@ __global__ void compute_sin_coeffs_kernel(const torch::PackedTensorAccessor32<fl
 
 	int iatom = blockIdx.x;
 
-	const double normf = sqrt(2.0 / double(nfeatures));
+	const float normf = sqrt(2.0 / float(nfeatures));
 
 	for (int N = threadIdx.x; N < nfeatures; N += blockDim.x) {
-		output[iatom][N] = sin((double) coefficients[iatom][N] + (double) bias[N]) * normf;
+		output[iatom][N] = sinf(coefficients[iatom][N] + bias[N]) * normf;
 	}
 }
 

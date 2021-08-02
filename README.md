@@ -1,6 +1,6 @@
-# QML-Lightning - Do Not Share Publically!
+<div style="text-align:center"><img src="./images/qml_lightning.png" alt="drawing" width="400"/></div>
 
-<img src="./images/qml_lightning.png" alt="drawing" width="400"/>
+# QML-Lightning - Do Not Share Publically!
 
 GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning. 
 
