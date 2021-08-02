@@ -8,7 +8,6 @@ Created on 1 Apr 2021
 
 '''
 
-from qml_lightning.cuda import egto_gpu
 from qml_lightning.cuda import pairlist_gpu
 from qml_lightning.cuda import egto_gpu2
 import torch
@@ -17,7 +16,7 @@ import torch.nn as nn
 
 
 def get_element_types(coordinates: torch.Tensor, charges: torch.Tensor, species: torch.Tensor):
-    return egto_gpu.get_element_types_gpu(coordinates, charges, species)
+    return egto_gpu2.get_element_types_gpu(coordinates, charges, species)
 
 
 def generate_angular_numbers(lmax):
