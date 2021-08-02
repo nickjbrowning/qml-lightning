@@ -33,31 +33,23 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'qml_lightning/cuda/gto_cuda.cpp',
             'qml_lightning/cuda/gto_cuda_kernel.cu'
         ],
-        extra_compile_args={'cxx': ['-g', '-std=c++1z'],
+         extra_compile_args={'cxx': ['-O2'],
                             'nvcc': ['-O2', '-ftz=true']})
-    
-#     gto2_extension = CUDAExtension(
-#         '.cuda.egto_gpu2', [
-#             'qml_lightning/cuda/gto_cuda2.cpp',
-#             'qml_lightning/cuda/gto_cuda_kernel2.cu'
-#         ],
-#         extra_compile_args={'cxx': ['-g'],
-#                             'nvcc': ['-O2', '-ftz=true']})
 
     gto2_extension = CUDAExtension(
         '.cuda.egto_gpu2', [
             'qml_lightning/cuda/gto_cuda2.cpp',
             'qml_lightning/cuda/gto_cuda_kernel2.cu'
         ],
-        extra_compile_args={'cxx': ['-g', '-std=c++1z'],
-                            'nvcc': ['-G' , '-g']})
+         extra_compile_args={'cxx': ['-O2'],
+                            'nvcc': ['-O2', '-ftz=true']})
     
     hd_extension = CUDAExtension(
         '.cuda.sorf_gpu', [
             'qml_lightning/cuda/hadamard_cuda.cpp',
             'qml_lightning/cuda/hadamard_kernel.cu'
         ],
-        extra_compile_args={'cxx': ['-g', '-std=c++1z'],
+         extra_compile_args={'cxx': ['-O2'],
                             'nvcc': ['-O2', '-ftz=true']})
     
     rff_extension = CUDAExtension(
@@ -65,7 +57,7 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'qml_lightning/cuda/random_features.cpp',
             'qml_lightning/cuda/random_features_kernel.cu'
         ],
-        extra_compile_args={'cxx': ['-g', '-std=c++1z'],
+        extra_compile_args={'cxx': ['-O2'],
                             'nvcc': ['-O2', '-ftz=true']})
     
     pairlist_extension = CUDAExtension(
@@ -73,7 +65,7 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'qml_lightning/cuda/pairlist_cuda.cpp',
             'qml_lightning/cuda/pairlist_kernel.cu'
         ],
-        extra_compile_args={'cxx': ['-g', '-std=c++1z'],
+ extra_compile_args={'cxx': ['-O2'],
                             'nvcc': ['-O2', '-ftz=true']})
     
     operator_extension = CUDAExtension(
@@ -81,7 +73,7 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'qml_lightning/cuda/operator_cuda.cpp',
             'qml_lightning/cuda/operator_kernel.cu'
         ],
-        extra_compile_args={'cxx': ['-g', '-std=c++1z'],
+         extra_compile_args={'cxx': ['-O2'],
                             'nvcc': ['-O2', '-ftz=true']})
     
     ext_modules.append(gto_extension)
