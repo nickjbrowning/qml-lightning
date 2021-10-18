@@ -86,6 +86,8 @@ __global__ void get_num_neighbours_kernel(const torch::PackedTensorAccessor32<fl
 		riy = coordinates[batchID][iatom][1];
 		riz = coordinates[batchID][iatom][2];
 	}
+
+	__syncthreads();
 //now loop through all atoms for batchID
 
 	for (int tile = 0; tile < ntiles; tile++) {
@@ -183,6 +185,9 @@ __global__ void get_neighbour_list_kernel(const torch::PackedTensorAccessor32<fl
 		riy = coordinates[batchID][iatom][1];
 		riz = coordinates[batchID][iatom][2];
 	}
+
+	__syncthreads();
+
 //now loop through all atoms for batchID
 
 	for (int tile = 0; tile < ntiles; tile++) {
@@ -222,13 +227,12 @@ __global__ void get_neighbour_list_kernel(const torch::PackedTensorAccessor32<fl
 
 			rij2 = drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2];
 
-			if (rij2 < rcut2 && rij2 > 0) {
+			if (rij2 < rcut2 && rij2 > 0 && iatom < natoms) {
 				neighbour_list[batchID][iatom][count] = jidx;
 				count++;
 			}
 		}
 	}
-
 }
 
 __global__ void safe_fill_kernel(torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> pairlist) {
@@ -268,60 +272,63 @@ void safeFillCUDA(torch::Tensor pairlist) {
 	dim3 numBlocks(currBatchSize, int(ceil(float(natoms) / nthreads)));
 	dim3 threadsPerBlock(1, nthreads);
 
-safe_fill_kernel<<<numBlocks, threadsPerBlock>>>( pairlist.packed_accessor32<int, 3, torch::RestrictPtrTraits>());
+	safe_fill_kernel<<<numBlocks, threadsPerBlock>>>( pairlist.packed_accessor32<int, 3, torch::RestrictPtrTraits>());
 
+	cudaDeviceSynchronize();
 }
 
 void getNumNeighboursCUDA(torch::Tensor coordinates, torch::Tensor natom_counts, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
-	torch::Tensor num_neighbours) {
+		torch::Tensor num_neighbours) {
 
-const int nthreads = 64;
+	const int nthreads = 64;
 
-int currBatchSize = coordinates.size(0);
-int natoms = natom_counts.max().item<int>();
+	int currBatchSize = coordinates.size(0);
+	int natoms = natom_counts.max().item<int>();
 
-int nBlockY = int(ceil(float(natoms) / nthreads));
+	int nBlockY = int(ceil(float(natoms) / nthreads));
 
-float rcut2 = rcut * rcut;
+	float rcut2 = rcut * rcut;
 
-dim3 numBlocks(currBatchSize, nBlockY);
-dim3 threadsPerBlock(1, nthreads);
+	dim3 numBlocks(currBatchSize, nBlockY);
+	dim3 threadsPerBlock(1, nthreads);
 
 //printf("natoms: %d BlockX: %d nBlockY: %d\n", natoms, currBatchSize, nBlockY);
 
-get_num_neighbours_kernel<<<numBlocks, threadsPerBlock, (4 * nthreads + 18) * sizeof(float)>>>(
-		coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-		natom_counts.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
-		rcut2,
-		lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-		inv_lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-		num_neighbours.packed_accessor32<int, 2, torch::RestrictPtrTraits>());
+	get_num_neighbours_kernel<<<numBlocks, threadsPerBlock, (4 * nthreads + 18) * sizeof(float)>>>(
+			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			natom_counts.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			rcut2,
+			lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			num_neighbours.packed_accessor32<int, 2, torch::RestrictPtrTraits>());
 
-cudaDeviceSynchronize();
+	cudaDeviceSynchronize();
 
 }
 
 void getNeighbourListCUDA(torch::Tensor coordinates, torch::Tensor natom_counts, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
-	torch::Tensor neighbour_list) {
+		torch::Tensor neighbour_list) {
 
-int currBatchSize = coordinates.size(0);
-int natoms = natom_counts.max().item<int>();
+	const int nthreads = 64;
 
-float rcut2 = rcut * rcut;
+	int currBatchSize = coordinates.size(0);
+	int natoms = natom_counts.max().item<int>();
 
-const int nthreads = 64;
+	int nBlockY = int(ceil(float(natoms) / nthreads));
 
-dim3 numBlocks(currBatchSize, int(ceil(float(natoms) / nthreads)));
-dim3 threadsPerBlock(1, nthreads);
+	float rcut2 = rcut * rcut;
 
-get_neighbour_list_kernel<<<numBlocks, threadsPerBlock, (4 * nthreads + 18) * sizeof(float)>>>(
-		coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-		natom_counts.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
-		rcut2,
-		lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-		inv_lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-		neighbour_list.packed_accessor32<int, 3, torch::RestrictPtrTraits>());
+	dim3 numBlocks(currBatchSize, nBlockY);
+	dim3 threadsPerBlock(1, nthreads);
 
-cudaDeviceSynchronize();
+	get_neighbour_list_kernel<<<numBlocks, threadsPerBlock, (4 * nthreads + 18) * sizeof(float)>>>(
+			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			natom_counts.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			rcut2,
+			lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_lattice_vecs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			neighbour_list.packed_accessor32<int, 3, torch::RestrictPtrTraits>());
+
+	cudaDeviceSynchronize();
 }
 

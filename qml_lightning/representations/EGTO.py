@@ -70,7 +70,11 @@ def get_egto(X: torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: to
  
     neighbourlist = pairlist_gpu.get_neighbour_list_gpu2(X, atom_counts, max_neighbours, rcut)
     
+    print (neighbourlist)
+    
     element_types = egto_gpu2.get_element_types_gpu2(X, Z, atom_counts, species) 
+    
+    print (element_types)
     
     output = egto_gpu2.get_egto(X, Z, species, element_types,
     atomIDs, molIDs, neighbourlist, nneighbours, mbody_list,
@@ -147,9 +151,9 @@ class EGTOCuda(Representation):
      
         neighbourlist = pairlist_gpu.get_neighbour_list_gpu(X, atom_counts, max_neighbours, self.high_cutoff,
                                                             cell, inv_cell)
-        
+         
         element_types = egto_gpu2.get_element_types_gpu2(X, Z, atom_counts, self.species) 
-  
+
         output = egto_gpu2.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
         self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff,
         cell, inv_cell, False)

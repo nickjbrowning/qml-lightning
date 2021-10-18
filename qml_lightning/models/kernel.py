@@ -522,6 +522,8 @@ class BaseKernel(object):
                 print ("element:", e, "index_set:", index_set[e])
             subsample_indexes = np.random.choice(index_set[e], size=np.min([len(index_set[e]), 1024]))
             
+            print (subsample_indexes.shape)
+            
             subsample_coordinates = [X[i] for i in subsample_indexes]
             subsample_charges = [Z[i] for i in subsample_indexes]
             
@@ -553,6 +555,8 @@ class BaseKernel(object):
                 idx = perm[:npca_choice]
         
                 choice_input = sub[idx]
+                
+                print (choice_input.shape)
                 
                 inputs.append(choice_input)
             

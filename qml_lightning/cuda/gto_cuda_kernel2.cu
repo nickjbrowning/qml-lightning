@@ -64,7 +64,7 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 
 	int norbs = gto_components.size(0);
 	int nspecies = species.size(0);
-	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
+	int nmbody = int((float(nspecies + 1.0) / 2.0) * nspecies);
 
 	int krepsize = nmbody * norbs * ngauss;
 	int lrepsize = nmbody * (lmax + 1) * ngauss;
@@ -161,10 +161,27 @@ __global__ void egto_atomic_representation_cuda(const torch::PackedTensorAccesso
 
 		int j = neighbourlist[molID][iatom][jatom];
 
+		if (j == -1) {
+			continue;
+		}
+
 		float rjx = coordinates[molID][j][0];
 		float rjy = coordinates[molID][j][1];
 		float rjz = coordinates[molID][j][2];
 		int element_type = element_types[molID][j];
+
+//		if (element_type < 0 || element_type > nspecies - 1 && threadIdx.x == 1) {
+//			printf("blockIdx.x: %d threadIdx.x: %d nneighbours: %d, neighbour: %d element_type: %d\n", blockIdx.x, threadIdx.x, nneighbours_i, j, element_type);
+//
+//			for (int c = 0; c < nneighbours_i; c++) {
+//				int j = neighbourlist[molID][iatom][c];
+//				printf("%d ", j);
+//			}
+//			printf("\n");
+//
+//		}
+
+		__syncthreads();
 
 		drij[0] = rix - rjx;
 		drij[1] = riy - rjy;
@@ -295,7 +312,7 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 	int ngauss = gridpoints.size(0);
 	int norbs = gto_components.size(0);
 	int nspecies = species.size(0);
-	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
+	int nmbody = int((float(nspecies + 1.0) / 2.0) * nspecies);
 
 	int krepsize = nmbody * norbs * ngauss;
 	int lrepsize = nmbody * (lmax + 1) * ngauss;
@@ -395,6 +412,10 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 
 		int j = neighbourlist[molID][iatom][jatom];
 
+		if (j == -1) {
+			continue;
+		}
+
 		float rjx = coordinates[molID][j][0];
 		float rjy = coordinates[molID][j][1];
 		float rjz = coordinates[molID][j][2];
@@ -445,6 +466,10 @@ __global__ void egto_atomic_representation_derivative_cuda(const torch::PackedTe
 	for (int jatom = 0; jatom < nneighbours_i; jatom++) {
 
 		int j = neighbourlist[molID][iatom][jatom];
+
+		if (j == -1) {
+			continue;
+		}
 
 		float rjx = coordinates[molID][j][0];
 		float rjy = coordinates[molID][j][1];
@@ -720,13 +745,13 @@ void EGTOCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factors, float eta,
 		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output) {
 
-	const int nthreads = 64;
+	const int nthreads = 32;
 
 	int ngaussians = gridpoints.size(0);
 	int nspecies = species.size(0);
 	int norbs = gto_components.size(0);
 
-	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
+	int nmbody = int(float((nspecies + 1) / 2.0) * nspecies);
 
 	const int currBatch = blockAtomIDs.size(0);
 	const int max_neighbours = nneighbours.max().item<int>();
@@ -767,13 +792,13 @@ void EGTODerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch:
 		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factors, float eta,
 		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output, torch::Tensor gto_output_derivative) {
 
-	const int nthreads = 64;
+	const int nthreads = 32;
 
 	int ngaussians = gridpoints.size(0);
 	int nspecies = species.size(0);
 	int norbs = gto_components.size(0);
 
-	int nmbody = int(((float(nspecies) + 1.0) / 2.0) * nspecies);
+	int nmbody = int(float((nspecies + 1) / 2.0) * nspecies);
 
 	const int currBatch = blockAtomIDs.size(0);
 	const int max_neighbours = nneighbours.max().item<int>();
