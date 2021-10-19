@@ -499,8 +499,14 @@ class BaseKernel(object):
     def predict_torch(self):
         raise NotImplementedError("Abstract method only.")
             
-    def get_reductors(self, X, Z, cells=None, npcas=128, npca_choice=512, print_info=True):
-    
+    def get_reductors(self, X, Z, cells=None, npcas=128, npca_choice=256, nsamples=4096, print_info=True):
+        
+        '''
+        npcas: length of low-dimension projection
+        npca_choice: for each batch, select at most this many atomic representations to be added to the SVD matrix
+        nsamples: (minimum) total number of selected atomic representations
+        '''
+        
         self.reductors = {}
         
         index_set = {}
@@ -522,14 +528,18 @@ class BaseKernel(object):
                 print ("element:", e, "index_set:", index_set[e])
             subsample_indexes = np.random.choice(index_set[e], size=np.min([len(index_set[e]), 1024]))
             
-            print (subsample_indexes.shape)
-            
             subsample_coordinates = [X[i] for i in subsample_indexes]
             subsample_charges = [Z[i] for i in subsample_indexes]
             
             inputs = []
             
+            nselected = 0
+            
             for i in range(0, len(subsample_coordinates), self.nbatch):
+                
+                # only collect nsample representations to compute the SVD
+                if (nselected > nsamples):
+                    break
                 
                 coordinates = subsample_coordinates[i:i + self.nbatch]
                 charges = subsample_charges[i:i + self.nbatch]
@@ -556,7 +566,7 @@ class BaseKernel(object):
         
                 choice_input = sub[idx]
                 
-                print (choice_input.shape)
+                nselected += choice_input.shape[0]
                 
                 inputs.append(choice_input)
             
