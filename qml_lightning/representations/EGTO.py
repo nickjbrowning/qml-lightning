@@ -14,89 +14,21 @@ import numpy as np
 import torch.nn as nn
 
 
-def get_element_types(coordinates: torch.Tensor, charges: torch.Tensor, species: torch.Tensor):
-    return egto_gpu2.get_element_types_gpu(coordinates, charges, species)
-
-
-def generate_angular_numbers(lmax):
-        angular_components = []
-        angular_weights = []
-        angular_indexes = []
-        
-        for i in range(lmax + 1):
-            for k in range (i + 1):
-                for m in range(i - k + 1):
-                    n = i - k - m
-                    angular_components.append([n, m, k])
-                    angular_weights.append(np.math.factorial(i) / (np.math.factorial(n) * np.math.factorial(m) * np.math.factorial(k)))
-                    angular_indexes.append(i)
-                    
-        angular_components = torch.FloatTensor(angular_components)
-        angular_weights = torch.FloatTensor(angular_weights)
-        angular_indexes = torch.IntTensor(angular_indexes)
-        
-        return angular_components, angular_weights, angular_indexes
-
-
-def get_egto(X: torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor,
-             species=torch.Tensor([1, 6, 7, 8, 9]).float().cuda(), ngaussians=20, eta=2.3, lmax=2, rcut=6.0, gradients=False):
-    
-    orbital_components, orbital_weights, orbital_indexes = generate_angular_numbers(lmax)
-    orbital_components = orbital_components.cuda()
-    orbital_weights = orbital_weights.cuda()
-    orbital_indexes = orbital_indexes.cuda()
-    
-    offset = torch.linspace(0.0, rcut, ngaussians + 1)[1:].cuda()
-    
-    mbody_list = torch.zeros(species.shape[0], species.shape[0], dtype=torch.int32)
-        
-    count = 0
-    
-    for i in range(species.shape[0]):
-        mbody_list[i][i] = count
-        count += 1
-        
-    for i in range(species.shape[0]):
-        for j in range(i + 1, species.shape[0]):
-            mbody_list[i][j] = count
-            mbody_list[j][i] = count
-            count += 1
-            
-    mbody_list = mbody_list.cuda()
-    
-    nneighbours = pairlist_gpu.get_num_neighbours_gpu2(X, atom_counts, rcut)
-        
-    max_neighbours = nneighbours.max().item()
- 
-    neighbourlist = pairlist_gpu.get_neighbour_list_gpu2(X, atom_counts, max_neighbours, rcut)
-    
-    print (neighbourlist)
-    
-    element_types = egto_gpu2.get_element_types_gpu2(X, Z, atom_counts, species) 
-    
-    print (element_types)
-    
-    output = egto_gpu2.get_egto(X, Z, species, element_types,
-    atomIDs, molIDs, neighbourlist, nneighbours, mbody_list,
-    orbital_components, orbital_weights, orbital_indexes, offset, eta, lmax, rcut,
-    gradients)
-    
-    if (gradients):
-        return output[0], output[1] 
-        
-    else:
-        return output[0]
-
-
-class Representation():
+class Representation(nn.Module):
     
     def __init__(self):
         pass
+    
+    def get_representation_torch(self):
+        raise NotImplementedError("Abstract method only.")
     
     def get_representation(self):
         raise NotImplementedError("Abstract method only.")
     
     def get_representation_and_derivative(self):
+        raise NotImplementedError("Abstract method only.")
+    
+    def forward(self):
         raise NotImplementedError("Abstract method only.")
 
 
@@ -107,6 +39,7 @@ class EGTOCuda(Representation):
         super(EGTOCuda, self).__init__()
         
         self.species = torch.from_numpy(species).float().cuda()
+        self.nspecies = len(species)
         
         self.low_cutoff = low_cutoff
         self.high_cutoff = high_cutoff
@@ -114,7 +47,9 @@ class EGTOCuda(Representation):
         self.eta = eta
         self.lmax = lmax
         self.lchannel_weights = torch.Tensor(lchannel_weights).cuda()
+        
         self.inv_factors = torch.Tensor(inv_factors).cuda()
+        self.init_inv_factors(inv_factors)
         
         self.generate_angular_numbers()
         
@@ -135,7 +70,61 @@ class EGTOCuda(Representation):
                 count += 1
             
         self.mbody_list = mbody_list.cuda()
+        
+        element_to_id = torch.zeros(max(self.species.int()) + 1, dtype=torch.long, device=torch.device('cuda'))
+        
+        for i, el in enumerate(self.species.int()):
+            element_to_id[el] = i
+            
+        self.element_to_id = element_to_id
+        
+        element_combinations = []
+        
+        for i in range(self.nspecies):
+            for j in range(i + 1, self.nspecies):
+                element_combinations.append([int(self.species[i]), int(self.species[j])])
+        
+        self.element_combinations = torch.cuda.LongTensor(element_combinations)
+        
+        self.nmbody = self.element_combinations.shape[0] + self.nspecies
+        
+        self.fp_size = ngaussians * (lmax + 1) * self.nmbody
+        
+        self.pi = torch.acos(torch.zeros(1)).cuda() * 2
+        
+        self.device = torch.device('cuda')
     
+    def init_inv_factors(self, factors):
+        
+        inv_factors = []
+        for i in range(self.lmax + 1):
+            for k in range (i + 1):
+                for m in range(i - k + 1):
+                    inv_factors.append(factors[i])
+                    
+        self.inv_factors_torch = torch.Tensor(inv_factors).cuda()
+        
+    def generate_angular_numbers(self):
+        angular_components = []
+        angular_weights = []
+        angular_indexes = []
+        
+        for i in range(self.lmax + 1):
+            for k in range (i + 1):
+                for m in range(i - k + 1):
+                    n = i - k - m
+                    angular_components.append([n, m, k])
+                    angular_weights.append(np.math.factorial(i) / (np.math.factorial(n) * np.math.factorial(m) * np.math.factorial(k)))
+                    angular_indexes.append(i)
+                    
+        angular_components = torch.FloatTensor(angular_components)
+        angular_weights = torch.FloatTensor(angular_weights)
+        angular_indexes = torch.IntTensor(angular_indexes)
+        
+        self.orbital_components = angular_components.cuda()
+        self.orbital_weights = angular_weights.cuda()
+        self.orbital_indexes = angular_indexes.cuda()
+        
     def get_representation(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor,
                            cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
         
@@ -206,26 +195,120 @@ class EGTOCuda(Representation):
                 
         return rep_derivative_fd
     
-    def generate_angular_numbers(self):
-        angular_components = []
-        angular_weights = []
-        angular_indexes = []
+    def get_representation_torch(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor, cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
+        return self.forward(X, Z, atom_counts, cell)
+    
+    def forward(self, coordinates, nuclear_charges, natom_counts, cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
+
+        n_batch, max_natoms, _ = coordinates.shape
         
-        for i in range(self.lmax + 1):
-            for k in range (i + 1):
-                for m in range(i - k + 1):
-                    n = i - k - m
-                    angular_components.append([n, m, k])
-                    angular_weights.append(np.math.factorial(i) / (np.math.factorial(n) * np.math.factorial(m) * np.math.factorial(k)))
-                    angular_indexes.append(i)
-                    
-        angular_components = torch.FloatTensor(angular_components)
-        angular_weights = torch.FloatTensor(angular_weights)
-        angular_indexes = torch.IntTensor(angular_indexes)
+        inv_cell = torch.empty(0, 3, 3, device=torch.device('cuda'))
+            
+        num_neighbours = pairlist_gpu.get_num_neighbours_gpu(coordinates, natom_counts, self.high_cutoff,
+                                                          cell, inv_cell)
         
-        self.orbital_components = angular_components.cuda()
-        self.orbital_weights = angular_weights.cuda()
-        self.orbital_indexes = angular_indexes.cuda()
+        max_neighbours = num_neighbours.max().item()
+        
+        neighbours = pairlist_gpu.get_neighbour_list_gpu(coordinates, natom_counts, max_neighbours, self.high_cutoff,
+                                                            cell, inv_cell)
+
+        pairlist_mask = (neighbours != -1)
+
+        # hack to get rid of the -1's - picks a valid index for a given atom and fills -1 values with that. pairlist_mask stores
+        # the "real" atom indexes
+        pairlist_gpu.safe_fill_gpu(neighbours)
+        
+        idx_m = torch.arange(coordinates.shape[0], dtype=torch.long)[:, None, None]
+        
+        local_atoms = coordinates[idx_m, neighbours.long()]
+
+        nbh_coords = (coordinates[:,:, None,:] - local_atoms)
+        
+        # TODO apply PBC here if cell is defined
+        if (cell.shape[0] > 0):
+            inv_cell = torch.inverse(cell)
+            
+        distances = torch.linalg.norm(nbh_coords, dim=3)
+        
+        # mask for the "dummy" atoms introduced when padding the neighbourlist to n_max_neighbours
+        parlist_maskval = torch.ones_like(neighbours)
+        pairlist_coeffs = parlist_maskval * pairlist_mask
+     
+        centered_distances = torch.pow(distances[..., None] - self.offset, 2)
+
+        neighbor_numbers = nuclear_charges[idx_m, neighbours[:,:,:].long()]
+  
+        cutoffs = 0.5 * (torch.cos(distances * self.pi / self.high_cutoff) + 1.0)
+       
+        radial_basis = torch.sqrt(self.eta / self.pi) * torch.exp(-self.eta * centered_distances) * cutoffs[..., None] * pairlist_coeffs[..., None]
+   
+        inv_scaling = torch.pow(1.0 / distances[..., None], self.inv_factors_torch + self.orbital_indexes) * pairlist_coeffs[..., None]
+      
+        angular_terms = inv_scaling * torch.pow(nbh_coords[..., None, 0] , self.orbital_components[:, 0 ]) * \
+                torch.pow(nbh_coords[..., None, 1] , self.orbital_components[:, 1 ]) * \
+                torch.pow(nbh_coords[..., None, 2] , self.orbital_components[:, 2 ])
+        
+        fingerprint = torch.zeros(n_batch, max_natoms, self.lmax + 1, self.nmbody, self.ngaussians, dtype=radial_basis.dtype, device=self.device)
+        
+        # first construct the single-species three-body terms, e.g X-HH, X-CC...
+        for i in range(self.nspecies):
+
+            elemental_fingerprint = torch.zeros(n_batch, max_natoms, self.lmax + 1, self.ngaussians, dtype=radial_basis.dtype, device=self.device)
+    
+            mask = (neighbor_numbers[..., None] == self.species[i]).any(-1)
+            
+            maskval = torch.ones_like(neighbor_numbers[..., None])
+            
+            mask_ = mask.unsqueeze(-1).expand(neighbours[..., None].size())
+            
+            coeffs = torch.squeeze(maskval * mask_, dim=-1)
+
+            filtered_radial = coeffs[..., None] * radial_basis 
+
+            test = angular_terms[... , None] * filtered_radial[..., None,:] 
+        
+            test = torch.sum(test, dim=2)
+
+            orbitals = self.orbital_weights[None, None,:, None] * torch.pow(test, 2)
+          
+            elemental_fingerprint.index_add_(2, self.orbital_indexes, orbitals)
+            
+            fingerprint[:,:,:, i,:] = (self.lchannel_weights[None, None,:, None] * elemental_fingerprint)
+        
+        # now construct the two-species three-body terms, e.g X-CH, X-CN, while negating out the single-species term
+        for i in range(self.element_combinations.shape[0]):
+    
+            elemental_fingerprint = torch.zeros(n_batch, max_natoms, self.lmax + 1, self.ngaussians, dtype=radial_basis.dtype, device=self.device)
+            
+            mbody = self.element_combinations[i]
+            
+            mask = (neighbor_numbers[..., None] == mbody).any(-1)
+            
+            maskval = torch.ones_like(neighbor_numbers[..., None])
+            
+            mask_ = mask.unsqueeze(-1).expand(neighbours[..., None].size())
+            
+            coeffs = torch.squeeze(maskval * mask_, dim=-1)
+            
+            masked_radial = coeffs[..., None] * radial_basis
+        
+            test = angular_terms[... , None] * masked_radial[..., None,:]
+            
+            test = torch.sum(test, dim=2)
+        
+            orbitals = self.orbital_weights[None, None,:, None] * torch.pow(test, 2)
+            
+            single_species_id = self.element_to_id[mbody]
+            
+            elemental_fingerprint.index_add_(2, self.orbital_indexes, orbitals)
+            
+            fingerprint[:,:,:, self.nspecies + i,:] = (self.lchannel_weights[None, None,:, None] * elemental_fingerprint) - (fingerprint[:,:,:, single_species_id[0],:] + \
+                                                                                fingerprint[:,:,:, single_species_id[1],:])
+        # zero out any invalid atom_ids
+        for i in range(n_batch):
+            fingerprint[i, natom_counts[i]:,:,:,:] = 0.0
+            
+        return fingerprint.reshape(n_batch, max_natoms, self.fp_size)
     
     
 class ElementalGTO(nn.Module):
@@ -780,7 +863,7 @@ class ElementalGTOLogNormalSkinCutoff(nn.Module):
                 torch.pow(nbh_coords[..., None, 1] , self.angular_components[:, 1 ]) * \
                 torch.pow(nbh_coords[..., None, 2] , self.angular_components[:, 2 ])
 
-        fingerprint = torch.zeros(n_batch, max_natoms, self.Lmax + 1, self.n_mbody, self.n_gaussians, dtype=radial_basis.dtype, device=self.device)
+        fingerprint = torch.zeros(n_batch, max_natoms, self.Lmax + 1, self.nmbody, self.n_gaussians, dtype=radial_basis.dtype, device=self.device)
         
         # first construct the single-species three-body terms, e.g X-HH, X-CC...
         for i in range(self.n_species):

@@ -11,7 +11,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument("-ntrain", type=int, default=1000)
-    parser.add_argument("-ntest", type=int, default=250)
+    parser.add_argument("-ntest", type=int, default=1000)
     parser.add_argument("-nreductor_samples", type=int, default=1000)
     parser.add_argument("-nbatch", type=int, default=64)
     
@@ -122,4 +122,7 @@ if __name__ == "__main__":
     energy_predictions = model.predict_cuda(test_coordinates, test_charges, max_natoms, forces=False)
     
     print("Energy MAE CUDA:", torch.mean(torch.abs(energy_predictions - test_energies)))
-
+    
+    energy_predictions = model.predict_torch(test_coordinates, test_charges, max_natoms, forces=False)
+    
+    print("Energy MAE torch:", torch.mean(torch.abs(energy_predictions - test_energies)))

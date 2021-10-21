@@ -100,7 +100,7 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     
-    unique_z = np.array([1.0, 6.0, 7.0, 8.0])
+    unique_z = np.array([1, 6, 7, 8])
     
     from pathlib import Path
     path = Path(paths[0])
@@ -161,3 +161,8 @@ if __name__ == "__main__":
 
     print("Energy MAE CUDA:", torch.mean(torch.abs(energy_predictions - test_energies)))
     print("Force MAE CUDA:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))
+    
+    energy_predictions, force_predictions = model.predict_torch(test_coordinates, test_charges, max_natoms, forces=True)
+    
+    print("Energy MAE torch:", torch.mean(torch.abs(energy_predictions - test_energies)))
+    print("Force MAE torch:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))

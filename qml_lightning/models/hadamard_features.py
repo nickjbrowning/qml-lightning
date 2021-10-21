@@ -5,6 +5,7 @@ Created on 3 May 2021
 '''
 import torch
 import numpy as np
+from tqdm import tqdm
 
 from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, SORFTransformCuda
 
@@ -16,7 +17,7 @@ from qml_lightning.representations.dimensionality_reduction import project_repre
 class HadamardFeaturesModel(BaseKernel):
     
     def __init__(self, rep=None, elements=np.array([1, 6, 7, 8]), ntransforms=1, sigma=3.0, llambda=1e-11,
-                 nfeatures=8192, npcas=128, nbatch=1024):
+                 nfeatures=8192, npcas=128, nbatch=64):
         
         super(HadamardFeaturesModel, self).__init__(rep, elements, sigma, llambda)
         
@@ -31,6 +32,8 @@ class HadamardFeaturesModel(BaseKernel):
         self.species = torch.from_numpy(elements).float().cuda()
         
         self.feature_normalisation = np.sqrt(2.0 / nfeatures)
+        
+        self.npcas = npcas
         
         self.nstacks = int(float(nfeatures) / npcas)
 
@@ -106,6 +109,97 @@ class HadamardFeaturesModel(BaseKernel):
                 feature_derivative[:, j, x,:] = (features_plus - features_minus) / (2 * dx)
                 
         return feature_derivative
+    
+    def predict_torch(self, X, Z, max_natoms, cells=None, forces=False, print_info=True):
+        
+        coeff_normalisation = np.sqrt(self.npcas) / self.sigma
+        
+        Dmat_new = {}
+        
+        for e in self.elements:
+            Dmat_new[e] = self.Dmat[e].reshape(1, int(self.nfeatures / self.npcas), self.npcas)
+        
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        
+        if (self.alpha is None):
+            print ("Error: must train the model first by calling train()!")
+            exit()
+        
+        predict_energies = torch.zeros(len(X), device=self.device, dtype=torch.float64)
+        predict_forces = torch.zeros(len(X), max_natoms, 3, device=self.device, dtype=torch.float64)
+        
+        start.record()
+        
+        for i in tqdm(range(0, len(X), self.nbatch)) if print_info else range(0, len(X), self.nbatch):
+            
+            coordinates = X[i:i + self.nbatch]
+            charges = Z[i:i + self.nbatch]
+            
+            zbatch = len(coordinates)
+            
+            if (cells is not None):
+                zcells = cells[i:i + self.nbatch]
+            else: zcells = None
+                
+            data = self.format_data(coordinates, charges, cells=zcells)
+            
+            coordinates = data['coordinates']
+            charges = data['charges']
+            atomIDs = data['atomIDs']
+            molIDs = data['molIDs']
+            natom_counts = data['natom_counts']
+            zcells = data['cells']
+            
+            if (forces):
+                coordinates.requires_grad = True
+                
+            torch_rep = self.rep.get_representation_torch(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
+            
+            Ztest = torch.zeros(zbatch, self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
+            
+            start.record()
+            for e in self.elements:
+                indexes = charges == e
+                
+                batch_indexes = torch.where(indexes)[0].type(torch.int)
+                
+                sub = torch_rep[indexes]
+                
+                if (sub.shape[0] == 0): continue
+                
+                sub = project_representation(sub, self.reductors[e])
+                
+                sub = sub.repeat(1, int(self.nfeatures / self.npcas)).reshape(sub.shape[0], int(self.nfeatures / self.npcas), self.npcas)
+               
+                coeffs = coeff_normalisation * SORFTransformCuda.apply(Dmat_new[e] * sub)
+               
+                coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
+ 
+                Ztest.index_add_(0, batch_indexes, self.feature_normalisation * torch.cos(coeffs + self.bk[e]))
+        
+            total_energies = torch.matmul(Ztest.double(), self.alpha)
+            
+            predict_energies[i:i + self.nbatch] = total_energies
+            
+            if (forces):
+                forces_cuda, = torch.autograd.grad(-total_energies.sum(), coordinates)
+
+                for j in range(forces_cuda.shape[0]):
+                    predict_forces[i + j,:natom_counts[j]] = forces_cuda[j,:natom_counts[j]]
+                
+            torch.cuda.empty_cache()
+                
+        end.record()
+        torch.cuda.synchronize()
+        
+        if (print_info):
+            print("prediction for", len(X), "molecules time: ", start.elapsed_time(end), "ms")
+        
+        if (forces):
+            return (predict_energies, predict_forces)
+        else:
+            return predict_energies
         
     def save_model(self, file_name="model.yaml"):
         pass

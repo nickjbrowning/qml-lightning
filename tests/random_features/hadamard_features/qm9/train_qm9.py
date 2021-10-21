@@ -127,4 +127,7 @@ if __name__ == "__main__":
     energy_predictions = model.predict_cuda(test_coordinates, test_charges, max_natoms, forces=False)
 
     print("Energy MAE CUDA:", torch.mean(torch.abs(energy_predictions - test_energies)))
-
+    
+    energy_predictions = model.predict_torch(test_coordinates, test_charges, max_natoms, forces=False)
+    
+    print("Energy MAE torch:", torch.mean(torch.abs(energy_predictions - test_energies)))
