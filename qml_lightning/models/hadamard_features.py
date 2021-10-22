@@ -112,6 +112,11 @@ class HadamardFeaturesModel(BaseKernel):
     
     def predict_torch(self, X, Z, max_natoms, cells=None, forces=False, print_info=True):
         
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        
+        start.record()
+        
         coeff_normalisation = np.sqrt(self.npcas) / self.sigma
         
         Dmat_new = {}
@@ -119,17 +124,12 @@ class HadamardFeaturesModel(BaseKernel):
         for e in self.elements:
             Dmat_new[e] = self.Dmat[e].reshape(1, int(self.nfeatures / self.npcas), self.npcas)
         
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        
         if (self.alpha is None):
             print ("Error: must train the model first by calling train()!")
             exit()
         
         predict_energies = torch.zeros(len(X), device=self.device, dtype=torch.float64)
         predict_forces = torch.zeros(len(X), max_natoms, 3, device=self.device, dtype=torch.float64)
-        
-        start.record()
         
         for i in tqdm(range(0, len(X), self.nbatch)) if print_info else range(0, len(X), self.nbatch):
             

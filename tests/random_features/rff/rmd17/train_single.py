@@ -4,7 +4,7 @@ import numpy as np
 import argparse
 
 from qml_lightning.representations.EGTO import EGTOCuda
-from qml_lightning.models.hadamard_features import HadamardFeaturesModel
+from qml_lightning.models.random_features import RandomFourrierFeaturesModel
 
 if __name__ == "__main__":
     
@@ -20,7 +20,6 @@ if __name__ == "__main__":
     parser.add_argument("-sigma", type=float, default=5.0)
     parser.add_argument("-llambda", type=float, default=1e-10)
     parser.add_argument("-npcas", type=int, default=128)
-    parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nfeatures", type=int, default=8192)
     
     '''representation parameters'''
@@ -46,8 +45,7 @@ if __name__ == "__main__":
     eta = args.eta
     lmax = args.lmax
     rcut = args.rcut
-    
-    ntransforms = args.ntransforms
+
     nfeatures = args.nfeatures
     
     use_forces = args.forces
@@ -106,7 +104,7 @@ if __name__ == "__main__":
     
     # rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[0.5, 1.3, 1.0])
 
-    model = HadamardFeaturesModel(rep, elements=unique_z, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
+    model = RandomFourrierFeaturesModel(rep, elements=unique_z, sigma=sigma, llambda=llambda,
                                 nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)
     
     print ("Calculating projection matrices...")
