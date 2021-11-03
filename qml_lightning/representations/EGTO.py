@@ -134,10 +134,6 @@ class EGTOCuda(Representation):
         angular_weights = torch.FloatTensor(angular_weights)
         angular_indexes = torch.IntTensor(angular_indexes)
         
-        print (angular_components)
-        print (angular_weights)
-        print (angular_indexes)
-        
         self.orbital_components = angular_components.cuda()
         self.orbital_weights = angular_weights.cuda()
         self.orbital_indexes = angular_indexes.cuda()
