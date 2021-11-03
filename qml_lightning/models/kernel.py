@@ -337,7 +337,7 @@ class BaseKernel(object):
         del ZTZ
         torch.cuda.empty_cache()
     
-    def hyperparam_opt_nested_cv(self, X, Z, E, F=None, sigmas=np.linspace(1.5, 12.5, 10), lambdas=np.logspace(-11, -5, 9), kfolds=5):
+    def hyperparam_opt_nested_cv(self, X, Z, E, F=None, sigmas=np.linspace(1.5, 12.5, 10), lambdas=np.logspace(-11, -5, 9), kfolds=5, print_info=True):
         from sklearn.model_selection import KFold
         
         kf = KFold(n_splits=kfolds, shuffle=False)
@@ -386,11 +386,13 @@ class BaseKernel(object):
                     
                     if (F is not None):
                         FMAE = torch.mean(torch.abs(force_predictions - test_forces))
-                        print ("Fold:" , k, sigma, llambda, EMAE, FMAE)
+                        if (print_info):
+                            print ("Fold:" , k, sigma, llambda, EMAE, FMAE)
                         fold_mae += 0.5 * (EMAE + FMAE)
                         
                     else:
-                        print ("Fold:" , k, sigma, llambda, EMAE)
+                        if (print_info):
+                            print ("Fold:" , k, sigma, llambda, EMAE)
                         fold_mae += EMAE
                     
                 fold_mae /= kfolds
@@ -406,7 +408,8 @@ class BaseKernel(object):
         best_sigma = sigmas[idxs[min_idx, 0]]
         best_llambda = lambdas[idxs[min_idx, 1]]
         
-        print ("Best MAE: ", errors[min_idx], "sigma = ", best_sigma, "lambda = ", best_llambda)
+        if (print_info):
+            print ("Best MAE: ", errors[min_idx], "sigma = ", best_sigma, "lambda = ", best_llambda)
         
         return best_sigma, best_llambda
         
