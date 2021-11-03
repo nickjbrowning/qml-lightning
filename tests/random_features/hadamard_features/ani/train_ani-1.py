@@ -2,7 +2,6 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from qml_lightning.utils.ani1_dataloader import iter_data_buckets
 import argparse
 
 from qml_lightning.models.hadamard_features import HadamardFeaturesModel
@@ -21,16 +20,16 @@ if __name__ == "__main__":
     parser.add_argument("-nbatch", type=int, default=64)
     
     '''model parameters'''
-    parser.add_argument("-sigma", type=float, default=2.0)
-    parser.add_argument("-llambda", type=float, default=1e-12)
-    parser.add_argument("-npcas", type=int, default=128)
-    parser.add_argument("-nfeatures", type=int, default=8192)
+    parser.add_argument("-sigma", type=float, default=2.7)
+    parser.add_argument("-llambda", type=float, default=1e-10)
+    parser.add_argument("-npcas", type=int, default=256)
+    parser.add_argument("-nfeatures", type=int, default=16384)
     parser.add_argument("-ntransforms", type=int, default=1)
     
     '''representation parameters'''
-    parser.add_argument("-eta", type=float, default=2.0)
+    parser.add_argument("-eta", type=float, default=1.0)
     parser.add_argument("-rcut", type=float, default=6.0)
-    parser.add_argument("-lmax", type=int, default=2)
+    parser.add_argument("-lmax", type=int, default=3)
     parser.add_argument("-ngaussians", type=int, default=20)
     
     args = parser.parse_args()
@@ -113,9 +112,9 @@ if __name__ == "__main__":
     test_charges = [Zs[i] for i in test_indexes]
     test_energies = [Es[i] for i in test_indexes]
 
-    representation = EGTOCuda(species=elements, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax)
+    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=2.0, lchannel_weights=1.0)
     
-    model = HadamardFeaturesModel(representation, elements=elements, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
+    model = HadamardFeaturesModel(rep, elements=unique_z, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
                                 nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)
     
     print ("Calculating projection matrices...")

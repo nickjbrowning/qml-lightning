@@ -99,7 +99,7 @@ if __name__ == "__main__":
     test_energies = [energies[i] for i in test_indexes]
     test_forces = [forces[i] for i in test_indexes]
 
-    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[1.0, 1.0, 1.0])
+    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=2.0, lchannel_weights=1.0)
     
     # rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[0.5, 1.3, 1.0])
 

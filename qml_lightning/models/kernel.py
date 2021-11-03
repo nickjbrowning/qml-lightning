@@ -317,10 +317,10 @@ class BaseKernel(object):
         end.record()
         torch.cuda.synchronize()
             
-        maxval = torch.max(torch.diagonal(ZTZ))
+        # maxval = torch.max(torch.diagonal(ZTZ))
         
         for i in range(self.nfeatures):
-            ZTZ[i, i] += (self.llambda * maxval)
+            ZTZ[i, i] += self.llambda
         
         if (print_info):
             print (ZTZ)

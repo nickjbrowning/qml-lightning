@@ -102,10 +102,8 @@ if __name__ == "__main__":
     test_energies = [energies[i] for i in test_indexes]
     test_forces = [forces[i] for i in test_indexes]
 
-    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[1.0, 1.0, 1.0])
+    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=2.0, lchannel_weights=1.0)
     
-    # rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[0.5, 1.3, 1.0])
-
     model = HadamardFeaturesModel(rep, elements=unique_z, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
                                 nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)
     
@@ -130,3 +128,8 @@ if __name__ == "__main__":
 
     print("Energy MAE CUDA:", torch.mean(torch.abs(energy_predictions - test_energies)))
     print("Force MAE CUDA:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))
+    
+    energy_predictions, force_predictions = model.predict_torch(test_coordinates, test_charges, max_natoms, forces=True)
+    
+    print("Energy MAE torch:", torch.mean(torch.abs(energy_predictions - test_energies)))
+    print("Force MAE torch:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))

@@ -41,8 +41,8 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'qml_lightning/cuda/gto_cuda2.cpp',
             'qml_lightning/cuda/gto_cuda_kernel2.cu'
         ],
-         extra_compile_args={'cxx': ['-O2'],
-                            'nvcc': ['-O2', '-ftz=true']})
+         extra_compile_args={'cxx': ['-g'],
+                            'nvcc': ['-G', '-ftz=true']})
     
     hd_extension = CUDAExtension(
         '.cuda.sorf_gpu', [

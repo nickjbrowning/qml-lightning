@@ -128,3 +128,8 @@ if __name__ == "__main__":
 
     print("Energy MAE CUDA:", torch.mean(torch.abs(energy_predictions - test_energies)))
     print("Force MAE CUDA:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))
+    
+    energy_predictions, force_predictions = model.predict_torch(test_coordinates, test_charges, max_natoms, forces=True)
+    
+    print("Energy MAE torch:", torch.mean(torch.abs(energy_predictions - test_energies)))
+    print("Force MAE torch:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))
