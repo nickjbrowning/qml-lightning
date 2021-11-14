@@ -37,9 +37,9 @@ class SimpleFeedForwardNetwork(pl.LightningModule):
         self.loss_function = loss_function
         self.force_training = force_training
     
-    def forward(self, coordinates, nuclear_charges):
+    def forward(self, coordinates, nuclear_charges, natom_counts):
 
-        fingerprint = self.fingerprint(coordinates, nuclear_charges)
+        fingerprint = self.fingerprint(coordinates, nuclear_charges, natom_counts)
 
         return torch.sum(self.element_mask(nuclear_charges) * 
                          torch.cat([net(fingerprint) for net in self.networks], dim=2), dim=2)
@@ -51,9 +51,9 @@ class SimpleFeedForwardNetwork(pl.LightningModule):
         return -derivative
 
     def training_step(self, batch, batch_idx):
-        coordinates, nuclear_charges, ref_energies, ref_forces = batch
+        coordinates, nuclear_charges, ref_energies, ref_forces, natom_counts = batch
         
-        energies = self.forward(coordinates, nuclear_charges)
+        energies = self.forward(coordinates, nuclear_charges, natom_counts)
         
         forces = None
 
@@ -68,9 +68,9 @@ class SimpleFeedForwardNetwork(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         torch.set_grad_enabled(True)
-        coordinates, nuclear_charges, ref_energies, ref_forces = batch
+        coordinates, nuclear_charges, ref_energies, ref_forces, natom_counts = batch
         coordinates.requires_grad = True
-        energies = self.forward(coordinates, nuclear_charges)
+        energies = self.forward(coordinates, nuclear_charges, natom_counts)
         forces = None
 
         if self.force_training:
@@ -100,9 +100,9 @@ class SimpleFeedForwardNetwork(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         torch.set_grad_enabled(True)
-        coordinates, nuclear_charges, ref_energies, ref_forces = batch
+        coordinates, nuclear_charges, ref_energies, ref_forces, natom_counts = batch
         coordinates.requires_grad = True
-        energies = self.forward(coordinates, nuclear_charges)
+        energies = self.forward(coordinates, nuclear_charges, natom_counts)
         forces = None
 
         if self.force_training:

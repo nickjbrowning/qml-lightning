@@ -6,12 +6,13 @@ import pytorch_lightning as pl
 
 class SimpleNetDataModule(pl.LightningDataModule):
 
-    def __init__(self, coords, nuclear_charges, energies, forces, ntrain=1000, nvalidation=1000, ntest=5000, batch_size=32, num_workers=1):
+    def __init__(self, coords, nuclear_charges, energies, forces, natom_counts, ntrain=1000, nvalidation=1000, ntest=5000, batch_size=32, num_workers=1):
         super().__init__()
         self.coords = coords
         self.nuclear_charges = nuclear_charges
         self.energies = energies
         self.forces = forces
+        self.natom_counts = natom_counts
         self.batch_size = batch_size
         
         self.ntrain = ntrain
@@ -28,7 +29,7 @@ class SimpleNetDataModule(pl.LightningDataModule):
         self.test_size = self.coords.shape[0] - self.train_size - self.val_size
 
     def setup(self, train_split=0.7):
-        data_full = SimpleNetDataloader(self.coords, self.nuclear_charges, self.energies, self.forces)
+        data_full = SimpleNetDataloader(self.coords, self.nuclear_charges, self.energies, self.forces, self.natom_counts)
         self.data_train, self.data_val, self.data_test = random_split(data_full, [self.train_size, self.val_size, self.test_size])
 
     def train_dataloader(self):
@@ -43,12 +44,12 @@ class SimpleNetDataModule(pl.LightningDataModule):
 
 class SimpleNetDataloader(Dataset):
 
-    def __init__(self, coords, nuclear_charges, energies, forces):
+    def __init__(self, coords, nuclear_charges, energies, forces, natom_counts):
         self.coords = coords
         self.nuclear_charges = nuclear_charges
         self.energies = energies
         self.forces = forces
-        
+        self.natom_counts = natom_counts
         self.hartree2kcalmol = 627.5095
         self.ev2kcalmol = 23.06
         
@@ -68,4 +69,5 @@ class SimpleNetDataloader(Dataset):
         return torch.tensor(self.coords[sample], requires_grad=True).float().cuda(), \
                torch.tensor(self.nuclear_charges[sample]).long().cuda(), \
                torch.tensor(self.energies[sample]).float().cuda(), \
-               torch.tensor(self.forces[sample]).float().cuda()
+               torch.tensor(self.forces[sample]).float().cuda(), \
+               torch.tensor(self.natom_counts[sample]).int().cuda()
