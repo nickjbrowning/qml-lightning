@@ -6,22 +6,22 @@ using namespace std;
 
 void getElementTypesCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natoms, torch::Tensor species, torch::Tensor element_types);
 
+void EGTORSwitchCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
+		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
+		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
+		int lmax, float rcut, float rswitch, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output);
+
+void EGTODerivativeRSwitchCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
+		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
+		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
+		int lmax, float rcut, float rswitch, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output, torch::Tensor gto_output_derivative);
+
 void EGTOCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
 		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
 		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output);
 
-void EGTOCuda_old(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
-		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
-		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output);
-
 void EGTODerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
-		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
-		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output, torch::Tensor gto_output_derivative);
-
-void EGTODerivativeCuda_old(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
 		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factor, float eta,
 		int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor gto_output, torch::Tensor gto_output_derivative);
@@ -133,10 +133,10 @@ std::vector<torch::Tensor> get_egto(torch::Tensor coordinates, torch::Tensor cha
 	}
 }
 
-std::vector<torch::Tensor> get_egto_old(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
+std::vector<torch::Tensor> get_egto_rswitch(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
 		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist,
 		torch::Tensor gto_components, torch::Tensor orbital_weights, torch::Tensor gto_powers, torch::Tensor gridpoints, torch::Tensor lchannel_weights,
-		torch::Tensor inv_factor, float eta, int lmax, float rcut, torch::Tensor cell, torch::Tensor inv_cell, bool gradients) {
+		torch::Tensor inv_factor, float eta, int lmax, float rcut, float rswitch, torch::Tensor cell, torch::Tensor inv_cell, bool gradients) {
 
 	/** ElementalGTO representation GPU wrapper
 	 *
@@ -198,16 +198,17 @@ std::vector<torch::Tensor> get_egto_old(torch::Tensor coordinates, torch::Tensor
 		torch::Tensor gto_output = torch::zeros( { nbatch, natoms, repsize }, options);
 		torch::Tensor gto_output_derivative = torch::zeros( { nbatch, natoms, natoms, 3, repsize }, options);
 
-		EGTODerivativeCuda_old(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, mbodylist, gto_components,
-				gto_powers, orbital_weights, gridpoints, lchannel_weights, inv_factor, eta, lmax, rcut, cell, inv_cell, gto_output, gto_output_derivative);
+		EGTODerivativeRSwitchCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, mbodylist,
+				gto_components, gto_powers, orbital_weights, gridpoints, lchannel_weights, inv_factor, eta, lmax, rcut, rswitch, cell, inv_cell, gto_output,
+				gto_output_derivative);
 
 		return {gto_output, gto_output_derivative};
 	} else {
 
 		torch::Tensor gto_output = torch::zeros( { nbatch, natoms, repsize }, options);
 
-		EGTOCuda_old(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, mbodylist, gto_components, gto_powers,
-				orbital_weights, gridpoints, lchannel_weights, inv_factor, eta, lmax, rcut, cell, inv_cell, gto_output);
+		EGTORSwitchCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, mbodylist, gto_components,
+				gto_powers, orbital_weights, gridpoints, lchannel_weights, inv_factor, eta, lmax, rcut, rswitch, cell, inv_cell, gto_output);
 
 		return {gto_output};
 	}
@@ -216,6 +217,7 @@ std::vector<torch::Tensor> get_egto_old(torch::Tensor coordinates, torch::Tensor
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
 	m.def("get_egto", &get_egto, "Elemental GTO Representation");
+	m.def("get_egto_rswitch", &get_egto_rswitch, "Elemental GTO Representation with switching function");
 	m.def("get_element_types_gpu", &get_element_types_gpu, "returns atomic species according to torch::Tensor species");
 
 }

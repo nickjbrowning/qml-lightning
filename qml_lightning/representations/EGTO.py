@@ -34,7 +34,8 @@ class Representation(nn.Module):
 
 class EGTOCuda(Representation):
 
-    def __init__(self, species=np.array([1, 6, 7, 8]), low_cutoff=0.0, high_cutoff=6.0, ngaussians=24, eta=1.2, lmax=3, lchannel_weights=1.0, inv_factors=1.0):
+    def __init__(self, species=np.array([1, 6, 7, 8]), low_cutoff=0.0, high_cutoff=6.0, ngaussians=24, eta=1.2, lmax=3,
+                 lchannel_weights=1.0, inv_factors=1.0, rswitch=4.5, cutoff_function="cosine"):
         
         super(EGTOCuda, self).__init__()
         
@@ -99,7 +100,11 @@ class EGTOCuda(Representation):
         self.pi = torch.acos(torch.zeros(1)).cuda() * 2
         
         self.device = torch.device('cuda')
-    
+        
+        self.rswitch = rswitch
+        
+        self.cutoff_function = cutoff_function
+
     def init_inv_factors(self, factors):
         
         if isinstance(factors, list) or isinstance(factors, np.ndarray):
@@ -155,10 +160,15 @@ class EGTOCuda(Representation):
                                                             cell, inv_cell)
          
         element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, self.species) 
-
-        output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
-        self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff,
-        cell, inv_cell, False)
+        
+        if (self.cutoff_function == "cosine"):
+            output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+                                   self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff,
+                                   cell, inv_cell, False)
+        else:
+            output = egto_gpu.get_egto_rswitch(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+                                   self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff, self.rswitch,
+                                   cell, inv_cell, False)
         
         return output[0]
     
@@ -179,10 +189,14 @@ class EGTOCuda(Representation):
                                                             cell, inv_cell)
         
         element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, self.species) 
-        
-        output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
-        self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff,
-        cell, inv_cell, True)
+        if (self.cutoff_function == "cosine"):
+            output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+            self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff,
+            cell, inv_cell, True)
+        else:
+            output = egto_gpu.get_egto_rswitch(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+            self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff, self.rswitch,
+            cell, inv_cell, True)
         
         return output[0], output[1]
     
@@ -203,28 +217,6 @@ class EGTOCuda(Representation):
                 X_copy[:, i, x] -= 2.0 * dx
                 
                 gto_minus = self.get_representation(X_copy, Z, atomIDs, molIDs, natom_counts)
-                
-                rep_derivative_fd[:,:, i, x,:] = (gto_plus - gto_minus) / (2.0 * dx)
-                
-        return rep_derivative_fd
-    
-    def rep_deriv_old_fd(self, X, Z, atomIDs, molIDs, natom_counts, dx=0.005):
-    
-        rep_derivative_fd = torch.zeros(X.shape[0], X.shape[1], X.shape[1], 3, self.fp_size, dtype=torch.float64, device=X.device)
-        
-        for i in range(X.shape[1]):
-        
-            for x in range (3):
-                
-                X_copy = X.clone()
-                
-                X_copy[:, i, x] += dx
-                
-                gto_plus = self.get_representation_old(X_copy, Z, atomIDs, molIDs, natom_counts)
-      
-                X_copy[:, i, x] -= 2.0 * dx
-                
-                gto_minus = self.get_representation_old(X_copy, Z, atomIDs, molIDs, natom_counts)
                 
                 rep_derivative_fd[:,:, i, x,:] = (gto_plus - gto_minus) / (2.0 * dx)
                 

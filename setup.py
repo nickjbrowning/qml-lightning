@@ -28,7 +28,7 @@ def requirements():
 
 if torch.cuda.is_available() and CUDA_HOME is not None:
     
-    gto2_extension = CUDAExtension(
+    gto_extension = CUDAExtension(
         '.cuda.egto_gpu', [
             'qml_lightning/cuda/gto_cuda.cpp',
             'qml_lightning/cuda/gto_cuda_kernel.cu'
@@ -69,7 +69,6 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
                             'nvcc': ['-O2', '-ftz=true']})
     
     ext_modules.append(gto_extension)
-    ext_modules.append(gto2_extension)
     ext_modules.append(hd_extension)
     ext_modules.append(pairlist_extension)
     # ext_modules.append(operator_extension)
