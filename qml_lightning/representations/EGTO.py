@@ -35,7 +35,7 @@ class Representation(nn.Module):
 class EGTOCuda(Representation):
 
     def __init__(self, species=np.array([1, 6, 7, 8]), low_cutoff=0.0, high_cutoff=6.0, ngaussians=24, eta=1.2, lmax=3,
-                 lchannel_weights=1.0, inv_factors=1.0, rswitch=4.5, cutoff_function="cosine"):
+                 lchannel_weights=1.0, inv_factors=1.0, rswitch=4.5, cutoff_function="cosine", distribution="gaussian"):
         
         super(EGTOCuda, self).__init__()
         
@@ -103,7 +103,17 @@ class EGTOCuda(Representation):
         
         self.rswitch = rswitch
         
-        self.cutoff_function = cutoff_function
+        if (cutoff_function == "cosine"):
+            self.cut_func = 0
+        elif (cutoff_function == "switch"):
+            self.cut_func = 1
+        else: self.cut_func = 0
+            
+        if (distribution == "gaussian"):
+            self.dist_func = 0
+        elif (distribution == "lognormal"):
+            self.dist_func = 1
+        else: self.dist_func = 0
 
     def init_inv_factors(self, factors):
         
@@ -160,15 +170,10 @@ class EGTOCuda(Representation):
                                                             cell, inv_cell)
          
         element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, self.species) 
-        
-        if (self.cutoff_function == "cosine"):
-            output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
-                                   self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff,
-                                   cell, inv_cell, False)
-        else:
-            output = egto_gpu.get_egto_rswitch(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
-                                   self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff, self.rswitch,
-                                   cell, inv_cell, False)
+
+        output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+                               self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff, self.rswitch,
+                               cell, inv_cell, self.cut_func, self.dist_func, False)
         
         return output[0]
     
@@ -189,14 +194,10 @@ class EGTOCuda(Representation):
                                                             cell, inv_cell)
         
         element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, self.species) 
-        if (self.cutoff_function == "cosine"):
-            output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
-            self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff,
-            cell, inv_cell, True)
-        else:
-            output = egto_gpu.get_egto_rswitch(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
-            self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff, self.rswitch,
-            cell, inv_cell, True)
+        
+        output = egto_gpu.get_egto(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours, self.mbody_list,
+        self.orbital_components, self.orbital_weights, self.orbital_indexes, self.offset, self.lchannel_weights, self.inv_factors, self.eta, self.lmax, self.high_cutoff, self.rswitch,
+        cell, inv_cell, self.cut_func, self.dist_func, True)
         
         return output[0], output[1]
     
