@@ -6,6 +6,7 @@ using namespace std;
 
 #define GAUSSIAN_DISTRIBUTION 0
 #define LOGNORMAL_DISTRIBUTION 1
+#define EXPEXP_DISTRIBUTION 2
 
 #define COSINE_CUTOFF 0
 #define SWITCH_FUNCTION 1
@@ -113,6 +114,10 @@ __device__ float get_radial_distribution(float rij, float eta, float *gridpoints
 		d = (1.0 / (gridpoints[index] * sigma * SQRT2PI)) * exp(-powf(log(gridpoints[index]) - mu, 2.0) / (2.0 * sigma2));
 		break;
 
+	case EXPEXP_DISTRIBUTION:
+		d = exp(-eta * powf(exp(-rij) - gridpoints[index], 2.0));
+		break;
+
 	default:
 		d = sqrt(eta / M_PI) * exp(-eta * powf(rij - gridpoints[index], 2.0));
 		break;
@@ -158,6 +163,10 @@ __device__ float get_radial_derivative_distribution(float drijx, float rij, floa
 		dradial_dx = (sqrt(2.0) / (2 * sqrt(M_PI) * gridpoints[index] * sigma4))
 				* (((mu - lnRs) * dsigma_dx - sigma * dmu_dx) * (mu - lnRs) - sigma2 * dsigma_dx) * exp_ln;
 
+		break;
+
+	case EXPEXP_DISTRIBUTION:
+		dradial_dx = 2.0 * eta * (-gridpoints[index] + exp(-rij)) * exp(-eta * powf(exp(-rij) - gridpoints[index], 2.0)) * exp(-rij) * -drijx;
 		break;
 
 	default:

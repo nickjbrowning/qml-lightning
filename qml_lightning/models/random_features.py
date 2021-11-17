@@ -126,7 +126,7 @@ class RandomFourrierFeaturesModel(BaseKernel):
         predict_forces = torch.zeros(len(X), max_natoms, 3, device=self.device, dtype=torch.float64)
         
         start.record()
-        
+            
         for i in tqdm(range(0, len(X), self.nbatch)) if print_info else range(0, len(X), self.nbatch):
             
             coordinates = X[i:i + self.nbatch]
@@ -153,8 +153,7 @@ class RandomFourrierFeaturesModel(BaseKernel):
             torch_rep = self.rep.get_representation_torch(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
             
             Ztest = torch.zeros(zbatch, self.nfeatures, device=torch.device('cuda'), dtype=torch.float64)
-            
-            start.record()
+   
             for e in self.elements:
                 indexes = charges == e
                 

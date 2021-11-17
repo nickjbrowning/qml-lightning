@@ -9,7 +9,7 @@ __global__ void hadamard_kernel(const torch::PackedTensorAccessor32<float, 3, to
 
 	extern __shared__ float s[];
 
-	const double normh = (1.0 / pow(2.0, double(log2N) / 2.0));
+	const float normh = (1.0 / pow(2.0, float(log2N) / 2.0));
 	const int nstacks = input.size(1);
 
 	for (int stack = 0; stack < nstacks; stack++) {
@@ -116,7 +116,7 @@ __global__ void sorf_matrix_kernel(const torch::PackedTensorAccessor32<float, 2,
 	int mdiag = D.size(0); // number of [HD] blocks to compute
 //loop over N/d hadamard transforms to create length-N feature vector
 
-	const double normh = (1.0 / pow(2.0, double(log2N) / 2.0));
+	const float normh = (1.0 / powf(2.0, float(log2N) / 2.0));
 
 	for (int stack = 0; stack < nstacks; stack++) {
 

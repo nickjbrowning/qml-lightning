@@ -122,7 +122,7 @@ class HadamardFeaturesModel(BaseKernel):
         Dmat_new = {}
         
         for e in self.elements:
-            Dmat_new[e] = self.Dmat[e].reshape(1, int(self.nfeatures / self.npcas), self.npcas)
+            Dmat_new[e] = self.Dmat[e].reshape(self.ntransforms, int(self.nfeatures / self.npcas), self.npcas)
         
         if (self.alpha is None):
             print ("Error: must train the model first by calling train()!")
@@ -130,7 +130,7 @@ class HadamardFeaturesModel(BaseKernel):
         
         predict_energies = torch.zeros(len(X), device=self.device, dtype=torch.float64)
         predict_forces = torch.zeros(len(X), max_natoms, 3, device=self.device, dtype=torch.float64)
-        
+
         for i in tqdm(range(0, len(X), self.nbatch)) if print_info else range(0, len(X), self.nbatch):
             
             coordinates = X[i:i + self.nbatch]
@@ -158,7 +158,6 @@ class HadamardFeaturesModel(BaseKernel):
             
             Ztest = torch.zeros(zbatch, self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
             
-            start.record()
             for e in self.elements:
                 indexes = charges == e
                 
@@ -171,8 +170,11 @@ class HadamardFeaturesModel(BaseKernel):
                 sub = project_representation(sub, self.reductors[e])
                 
                 sub = sub.repeat(1, int(self.nfeatures / self.npcas)).reshape(sub.shape[0], int(self.nfeatures / self.npcas), self.npcas)
-               
-                coeffs = coeff_normalisation * SORFTransformCuda.apply(Dmat_new[e] * sub)
+                
+                coeffs = coeff_normalisation
+                
+                for j in range(self.ntransforms):
+                    coeffs *= SORFTransformCuda.apply(Dmat_new[e][None, j] * sub)
                
                 coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
  
@@ -187,9 +189,7 @@ class HadamardFeaturesModel(BaseKernel):
 
                 for j in range(forces_cuda.shape[0]):
                     predict_forces[i + j,:natom_counts[j]] = forces_cuda[j,:natom_counts[j]]
-                
-            torch.cuda.empty_cache()
-                
+  
         end.record()
         torch.cuda.synchronize()
         

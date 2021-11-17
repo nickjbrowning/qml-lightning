@@ -59,7 +59,12 @@ class EGTOCuda(Representation):
         
         self.generate_angular_numbers()
         
-        self.offset = torch.linspace(0.0, self.high_cutoff, ngaussians + 1)[1:].cuda()
+        # eta = (0.5 / ((1.0 - np.exp(-cutoff)) / K)) ** 2 
+        
+        if (distribution == "expexp"):
+            self.offset = torch.linspace(np.exp(-0.4), np.exp(-self.high_cutoff), ngaussians).cuda()
+        else:
+            self.offset = torch.linspace(0.0, self.high_cutoff, ngaussians + 1)[1:].cuda()
         
         print (self.offset)
         mbody_list = torch.zeros(species.shape[0], species.shape[0], dtype=torch.int32)
@@ -113,6 +118,8 @@ class EGTOCuda(Representation):
             self.dist_func = 0
         elif (distribution == "lognormal"):
             self.dist_func = 1
+        elif(distribution == "expexp"):
+            self.dist_func = 2
         else: self.dist_func = 0
 
     def init_inv_factors(self, factors):
