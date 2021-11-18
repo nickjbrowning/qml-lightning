@@ -107,7 +107,7 @@ class BaseKernel(object):
                 
                 Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
                 
-                Y = torch.cat(Y, forces.flatten()[:, None])
+                Y = torch.cat((Y, forces.flatten()[:, None]))
                 
             r += torch.matmul(Ztrain.T, Y)
 
@@ -196,6 +196,8 @@ class BaseKernel(object):
             rsnew = torch.matmul(r.T, rhat_new)
             
             p = rhat_new + (rsnew / rsold) * p
+            
+            print (j, rsnew)
             
             rsold = rsnew
             
