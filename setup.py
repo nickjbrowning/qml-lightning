@@ -36,6 +36,14 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
          extra_compile_args={'cxx': ['-O2'],
                             'nvcc': ['-O2', '-ftz=true']})
     
+    fchl_extension = CUDAExtension(
+        '.cuda.fchl_gpu', [
+            'qml_lightning/cuda/fchl_cuda.cpp',
+            'qml_lightning/cuda/fchl_cuda_kernel.cu'
+        ],
+         extra_compile_args={'cxx': ['-O2'],
+                            'nvcc': ['-O2', '-ftz=true']})
+    
     hd_extension = CUDAExtension(
         '.cuda.sorf_gpu', [
             'qml_lightning/cuda/hadamard_cuda.cpp',
@@ -71,7 +79,7 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
     ext_modules.append(gto_extension)
     ext_modules.append(hd_extension)
     ext_modules.append(pairlist_extension)
-    # ext_modules.append(operator_extension)
+    ext_modules.append(fchl_extension)
     ext_modules.append(rff_extension)
     
 else:
