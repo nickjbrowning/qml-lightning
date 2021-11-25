@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument("-ntest", type=int, default=1000)
     parser.add_argument("-nreductor_samples", type=int, default=1024)
     parser.add_argument("-nbatch", type=int, default=128)
-    parser.add_argument("-data", type=str, default='/home/nick/data/rmd17/npz_data/rmd17_aspirin.npz')
+    parser.add_argument("-data", type=str, default='../../data/rmd17_aspirin.npz')
     
     '''model parameters'''
     parser.add_argument("-sigma", type=float, default=8.0)
