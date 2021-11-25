@@ -138,7 +138,6 @@ class FCHLCuda(Representation):
         return derivative
         
     def forward(self, coordinates, nuclear_charges, natom_counts, cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
-        
-        # TODO
+        raise Exception("Not Implemented!")
         return None
 

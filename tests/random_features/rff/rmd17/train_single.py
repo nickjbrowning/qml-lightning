@@ -11,22 +11,23 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument("-ntrain", type=int, default=1000)
-    parser.add_argument("-ntest", type=int, default=250)
+    parser.add_argument("-ntest", type=int, default=1000)
     parser.add_argument("-nreductor_samples", type=int, default=1024)
     parser.add_argument("-nbatch", type=int, default=128)
     parser.add_argument("-data", type=str, default='/home/nick/data/rmd17/npz_data/rmd17_aspirin.npz')
     
     '''model parameters'''
-    parser.add_argument("-sigma", type=float, default=5.0)
-    parser.add_argument("-llambda", type=float, default=1e-10)
-    parser.add_argument("-npcas", type=int, default=128)
-    parser.add_argument("-nfeatures", type=int, default=8192)
+    parser.add_argument("-sigma", type=float, default=8.0)
+    parser.add_argument("-llambda", type=float, default=1e-9)
+    parser.add_argument("-npcas", type=int, default=256)
+    parser.add_argument("-nfeatures", type=int, default=16384)
     
     '''representation parameters'''
-    parser.add_argument("-eta", type=float, default=2.6)
-    parser.add_argument("-rcut", type=float, default=6.0)
-    parser.add_argument("-lmax", type=int, default=2)
-    parser.add_argument("-ngaussians", type=int, default=20)
+    parser.add_argument("-eta", type=float, default=2.3)
+    parser.add_argument("-inv_factor", type=float, default=1.8)
+    parser.add_argument("-rcut", type=float, default=8.0)
+    parser.add_argument("-lmax", type=int, default=4)
+    parser.add_argument("-ngaussians", type=int, default=24)
     parser.add_argument("-forces", type=int, default=1)
     
     args = parser.parse_args()
@@ -100,7 +101,7 @@ if __name__ == "__main__":
     test_energies = [energies[i] for i in test_indexes]
     test_forces = [forces[i] for i in test_indexes]
 
-    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[1.0, 1.0, 1.0])
+    rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=args.inv_factor, lchannel_weights=1.0)
     
     # rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[0.5, 1.3, 1.0])
 
