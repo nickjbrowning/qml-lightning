@@ -358,20 +358,20 @@ class BaseKernel(object):
                 fold_mae = 0.0
                 
                 for k, (train_index, test_index) in enumerate(kf.split(X)):
-                    Xtrain = [X[i] for i in train_index]
-                    Ztrain = [Z[i] for i in train_index]
-                    Etrain = [E[i] for i in train_index]
+                    Xtrain = [X[z] for z in train_index]
+                    Ztrain = [Z[z] for z in train_index]
+                    Etrain = [E[z] for z in train_index]
                         
-                    Xtest = [X[i] for i in test_index]
-                    Ztest = [Z[i] for i in test_index]
-                    Etest = [E[i] for i in test_index]
+                    Xtest = [X[z] for z in test_index]
+                    Ztest = [Z[z] for z in test_index]
+                    Etest = [E[z] for z in test_index]
                     
                     Ftrain = None
                     Ftest = None
                     
                     if (F is not None):
-                        Ftrain = [F[i] for i in train_index]
-                        Ftest = [F[i] for i in test_index]
+                        Ftrain = [F[z] for z in train_index]
+                        Ftest = [F[z] for z in test_index]
                     
                     self.sigma = sigma
                     self.llambda = llambda
@@ -408,9 +408,17 @@ class BaseKernel(object):
                 grid_locs.append([i, j])
 
         errors = np.array(errors)
+        
+        if (print_info):
+            print ("errors: ", errors)
+            print (grid_locs)
+        
         idxs = np.array(grid_locs)
         
         min_idx = np.argmin(errors)
+        
+        if (print_info):
+            print ("min_idx:", min_idx)
         
         best_sigma = sigmas[idxs[min_idx, 0]]
         best_llambda = lambdas[idxs[min_idx, 1]]
