@@ -506,7 +506,7 @@ class BaseKernel(object):
         else:
             return predict_energies
     
-    def predict(self, X, Z, max_natoms, cells=None, forces=False, print_info=True, use_backwards=True):
+    def predict(self, X, Z, max_natoms, cells=None, forces=False, print_info=True, use_backward=True):
         raise NotImplementedError("Abstract method only.")
             
     def get_reductors(self, X, Z, cells=None, npcas=128, npca_choice=256, nsamples=4096, print_info=True):
