@@ -14,7 +14,80 @@ import numpy as np
 from qml_lightning.representations.Representation import Representation
 
 
-class FCHLCuda(Representation):
+class FCHLFunction(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, X, non_grad_parameters):
+        
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        
+        start.record()
+        
+        Z, species, atomIDs, molIDs, atom_counts, cell, \
+                Rs2, Rs3, eta2, eta3, two_body_decay, three_body_weight, three_body_decay, rcut = non_grad_parameters
+
+        inv_cell = torch.empty(0, 3, 3, device=torch.device('cuda'))
+        
+        if (cell.shape[0] > 0):
+            inv_cell = torch.inverse(cell)
+            
+        nneighbours = pairlist_gpu.get_num_neighbours_gpu(X, atom_counts, rcut,
+                                                         cell , inv_cell)
+      
+        max_neighbours = nneighbours.max().item()
+     
+        neighbourlist = pairlist_gpu.get_neighbour_list_gpu(X, atom_counts, max_neighbours, rcut,
+                                                            cell, inv_cell)
+         
+        element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, species) 
+        
+        ctx.save_for_backward(X, Z, species, atomIDs, molIDs, element_types, neighbourlist, nneighbours)
+        
+        ctx.Rs2 = Rs2
+        ctx.Rs3 = Rs3
+        ctx.eta2 = eta2
+        ctx.eta3 = eta3
+        ctx.two_body_decay = two_body_decay
+        ctx.three_body_weight = three_body_weight
+        ctx.three_body_decay = three_body_decay 
+        ctx.rcut = rcut
+        
+        output = fchl_gpu.get_fchl_representation(X, Z, species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+                               Rs2, Rs3, eta2, eta3, two_body_decay, three_body_weight, three_body_decay,
+                               rcut)
+        
+        end.record()
+        torch.cuda.synchronize()
+        
+        # print ("forwards time: ", start.elapsed_time(end))
+        
+        return output
+
+    @staticmethod
+    def backward(ctx, gradX):
+
+        X, Z, species, atomIDs, molIDs, element_types, neighbourlist, nneighbours = ctx.saved_tensors
+        
+        grad_out = fchl_gpu.fchl_backwards(X, Z, species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+                               ctx.Rs2, ctx.Rs3, ctx.eta2, ctx.eta3, ctx.two_body_decay, ctx.three_body_weight, ctx.three_body_decay,
+                               ctx.rcut, gradX)
+        
+        # grad = fchl_gpu.get_fchl_derivative(X, Z, species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+        #                       ctx.Rs2, ctx.Rs3, ctx.eta2, ctx.eta3, ctx.two_body_decay, ctx.three_body_weight, ctx.three_body_decay,
+        #                       ctx.rcut)
+        #            a       b        c    d     e
+        # output : nbatch, natoms, natoms, 3, repsize
+        #            a       b                   e
+        # gradX :  nbatch, natoms,      1, 1, repsize
+        # grad_out = torch.einsum('abcde,abe->acd', grad, gradX)
+        
+        # print ("backwards time: ", start.elapsed_time(end))
+        
+        return grad_out, None
+    
+
+class FCHLCuda(torch.nn.Module):
 
     def __init__(self, species=np.array([1, 6, 7, 8]), low_cutoff=0.0, high_cutoff=8.0, nRs2=24, nRs3=20,
                  eta2=0.32, eta3=2.7, two_body_decay=1.8, three_body_weight=13.4, three_body_decay=0.57):
@@ -65,11 +138,11 @@ class FCHLCuda(Representation):
          
         element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, self.species) 
 
-        output = fchl_gpu.get_fchl(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+        output = fchl_gpu.get_fchl_representation(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
                                self.Rs2, self.Rs3, self.eta2, self.eta3, self.two_body_decay, self.three_body_weight, self.three_body_decay,
-                               self.high_cutoff, False)
-        
-        return output[0]
+                               self.high_cutoff)
+ 
+        return output
     
     def get_representation_and_derivative(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor,
                                                                      cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
@@ -89,7 +162,7 @@ class FCHLCuda(Representation):
         
         element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, self.species) 
         
-        output = fchl_gpu.get_fchl(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+        output = fchl_gpu.get_fchl_and_derivative(X, Z, self.species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
                                self.Rs2, self.Rs3, self.eta2, self.eta3, self.two_body_decay, self.three_body_weight, self.three_body_decay,
                                self.high_cutoff, True)
          
@@ -116,28 +189,8 @@ class FCHLCuda(Representation):
                 rep_derivative_fd[:,:, i, x,:] = (gto_plus - gto_minus) / (2.0 * dx)
                 
         return rep_derivative_fd
-    
-    def get_representation_torch(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor, cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
-        return self.forward(X, Z, atom_counts, cell)
-    
-    def get_representation_derivative_torch(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor, cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
-        
-        X.requires_grad = True
-        
-        gto = self.forward(X, Z, atom_counts, cell)
 
-        derivative = torch.zeros(X.shape[0], X.shape[1], X.shape[1], 3, gto.shape[2], device=torch.device('cuda'))
-        
-        for i in range (gto.shape[0]):
-            for j in range(gto.shape[1]):
-                for k in range(gto.shape[2]):
-                    grad, = torch.autograd.grad(gto[i, j, k], X, retain_graph=True, allow_unused=True)
-              
-                    derivative[:, j,:,:, k] = grad
+    def forward(self, X, Z, atomIDs, molIDs, atom_counts, cell):
+        return FCHLFunction.apply(X, (Z, self.species, atomIDs, molIDs, atom_counts, cell,
+                self.Rs2, self.Rs3, self.eta2, self.eta3, self.two_body_decay, self.three_body_weight, self.three_body_decay, self.high_cutoff))
     
-        return derivative
-        
-    def forward(self, coordinates, nuclear_charges, natom_counts, cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
-        raise Exception("Not Implemented!")
-        return None
-

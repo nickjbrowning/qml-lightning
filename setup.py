@@ -15,6 +15,8 @@ __status__ = "Alpha"
 __description__ = "GPU-Accelerated Kernel Methods for Quantum Machine Learning"
 __url__ = "TODO"
 
+optimisation_level = '-O2'
+
 
 def readme():
     with open('README.md') as f:
@@ -33,54 +35,55 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'qml_lightning/cuda/gto_cuda.cpp',
             'qml_lightning/cuda/gto_cuda_kernel.cu'
         ],
-         extra_compile_args={'cxx': ['-O2'],
-                            'nvcc': ['-O2', '-ftz=true']})
+         extra_compile_args={'cxx': [optimisation_level],
+                            'nvcc': [optimisation_level, '-ftz=true']})
     
     fchl_extension = CUDAExtension(
         '.cuda.fchl_gpu', [
             'qml_lightning/cuda/fchl_cuda.cpp',
             'qml_lightning/cuda/fchl_cuda_kernel.cu'
         ],
-         extra_compile_args={'cxx': ['-O2'],
-                            'nvcc': ['-O2', '-ftz=true']})
+         extra_compile_args={'cxx': [optimisation_level],
+                            'nvcc': [optimisation_level, '-ftz=true']})
     
     hd_extension = CUDAExtension(
         '.cuda.sorf_gpu', [
             'qml_lightning/cuda/hadamard_cuda.cpp',
             'qml_lightning/cuda/hadamard_kernel.cu'
         ],
-         extra_compile_args={'cxx': ['-O2'],
-                            'nvcc': ['-O2', '-ftz=true']})
+         extra_compile_args={'cxx': [optimisation_level],
+                            'nvcc': [optimisation_level, '-ftz=true']})
     
     rff_extension = CUDAExtension(
         '.cuda.rff_gpu', [
             'qml_lightning/cuda/random_features.cpp',
             'qml_lightning/cuda/random_features_kernel.cu'
         ],
-        extra_compile_args={'cxx': ['-O2'],
-                            'nvcc': ['-O2', '-ftz=true']})
+        extra_compile_args={'cxx': [optimisation_level],
+                            'nvcc': [optimisation_level, '-ftz=true']})
     
     pairlist_extension = CUDAExtension(
         '.cuda.pairlist_gpu', [
             'qml_lightning/cuda/pairlist_cuda.cpp',
             'qml_lightning/cuda/pairlist_kernel.cu'
         ],
- extra_compile_args={'cxx': ['-O2'],
-                            'nvcc': ['-O2', '-ftz=true']})
+ extra_compile_args={'cxx': [optimisation_level],
+                            'nvcc': [optimisation_level, '-ftz=true']})
     
     operator_extension = CUDAExtension(
         '.cuda.operator_gpu', [
             'qml_lightning/cuda/operator_cuda.cpp',
             'qml_lightning/cuda/operator_kernel.cu'
         ],
-         extra_compile_args={'cxx': ['-O2'],
-                            'nvcc': ['-O2', '-ftz=true']})
+         extra_compile_args={'cxx': [optimisation_level],
+                            'nvcc': [optimisation_level, '-ftz=true']})
     
     ext_modules.append(gto_extension)
     ext_modules.append(hd_extension)
     ext_modules.append(pairlist_extension)
     ext_modules.append(fchl_extension)
     ext_modules.append(rff_extension)
+    ext_modules.append(operator_extension)
     
 else:
     print("ERROR: cuda not available, or CUDA_HOME not set.")

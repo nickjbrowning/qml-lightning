@@ -41,14 +41,14 @@ class BaseKernel(object):
         if (preconditioner is None):
             preconditioner = torch.eye(self.nfeatures, device=self.device, dtype=torch.float64)
             
-        for i in range(0, len(X), self.nbatch):
+        for i in range(0, len(X), self.nbatch_train):
             
-            coordinates = X[i:i + self.nbatch]
-            charges = Z[i:i + self.nbatch]
-            energies = E[i:i + self.nbatch]
+            coordinates = X[i:i + self.nbatch_train]
+            charges = Z[i:i + self.nbatch_train]
+            energies = E[i:i + self.nbatch_train]
             
             if (F is not None):
-                forces = F[i:i + self.nbatch]
+                forces = F[i:i + self.nbatch_train]
             else:
                 forces = None
                 
@@ -120,14 +120,14 @@ class BaseKernel(object):
             
             Ap = torch.zeros(self.nfeatures, 1, device=self.device, dtype=torch.float64)
             
-            for i in range(0, len(X), self.nbatch):
+            for i in range(0, len(X), self.nbatch_train):
             
-                coordinates = X[i:i + self.nbatch]
-                charges = Z[i:i + self.nbatch]
-                energies = E[i:i + self.nbatch]
+                coordinates = X[i:i + self.nbatch_train]
+                charges = Z[i:i + self.nbatch_train]
+                energies = E[i:i + self.nbatch_train]
                 
                 if (F is not None):
-                    forces = F[i:i + self.nbatch]
+                    forces = F[i:i + self.nbatch_train]
                 else:
                     forces = None
                     
@@ -203,10 +203,14 @@ class BaseKernel(object):
             
         self.alpha = x[:, 0]
     
-    def train(self, X, Z, E, F=None, cells=None, print_info=True):
+    def train(self, X, Z, E=None, F=None, cells=None, print_info=True):
             
         if (self.reductors is None):
             print("ERROR: Must call model.get_reductors() first to initialize the projection matrices.")
+            exit()
+            
+        if (E is None and F is None):
+            print("ERROR: must have either E, F or both as input to train().")
             exit()
         
         start = torch.cuda.Event(enable_timing=True)
@@ -219,20 +223,14 @@ class BaseKernel(object):
         ZtrainY = torch.zeros(self.nfeatures, 1, device=self.device, dtype=torch.float64)
 
         start.record()
-        for i in tqdm(range(0, len(X), self.nbatch)) if print_info else (range(0, len(X), self.nbatch)):
+        for i in tqdm(range(0, len(X), self.nbatch_train)) if print_info else (range(0, len(X), self.nbatch_train)):
             
-            coordinates = X[i:i + self.nbatch]
-            charges = Z[i:i + self.nbatch]
-            energies = E[i:i + self.nbatch]
+            coordinates = X[i:i + self.nbatch_train]
+            charges = Z[i:i + self.nbatch_train]
             
-            if (F is not None):
-                forces = F[i:i + self.nbatch]
-            else:
-                forces = None
-                
-            if (cells is not None):
-                zcells = cells[i:i + self.nbatch] 
-            else: zcells = None
+            energies = E[i:i + self.nbatch_train] if E is not None else None
+            forces = F[i:i + self.nbatch_train] if F is not None else None
+            zcells = cells[i:i + self.nbatch_train]  if cells is not None else None
                 
             zbatch = len(coordinates)
             
@@ -248,7 +246,13 @@ class BaseKernel(object):
             energies = data['energies']
             forces = data['forces']
             
-            targets = energies[:, None]
+            if (E is not None and F is None):
+                targets = energies[:, None] 
+            elif (E is None and F is not None):
+                # zero out energy targets so it has the correct dimensions for matmul
+                targets = torch.cat((torch.zeros((zbatch, 1), device=self.device), forces.flatten()[:, None]), dim=0)
+            else:
+                targets = torch.cat((energies[:, None], forces.flatten()[:, None]), dim=0)
             
             max_natoms = natom_counts.max().item()
             
@@ -286,12 +290,13 @@ class BaseKernel(object):
      
                 self.calculate_features(sub, e, batch_indexes, Ztrain, sub_grad, Gtrain_derivative)
             
+            if (E is None):
+                Ztrain.fill_(0)  # hack to set all energy features to 0, such that they do not contribute to Z.T Z
+            
             if (F is not None):
                 Gtrain_derivative = Gtrain_derivative.reshape(zbatch * max_natoms * 3, self.nfeatures)
                 
                 Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
-                
-                targets = torch.cat((targets, forces.flatten()[:, None]), dim=0)
             
             endg.record()
             torch.cuda.synchronize()
@@ -339,7 +344,7 @@ class BaseKernel(object):
         del ZTZ
         torch.cuda.empty_cache()
     
-    def hyperparam_opt_nested_cv(self, X, Z, E, F=None, sigmas=np.linspace(1.5, 12.5, 10), lambdas=np.logspace(-11, -5, 9), kfolds=5, print_info=True):
+    def hyperparam_opt_nested_cv(self, X, Z, E, F=None, sigmas=np.linspace(1.5, 12.5, 10), lambdas=np.logspace(-11, -5, 9), kfolds=5, print_info=True, use_backward=True):
         from sklearn.model_selection import KFold
         
         kf = KFold(n_splits=kfolds, shuffle=False)
@@ -380,9 +385,9 @@ class BaseKernel(object):
                     max_natoms = data['natom_counts'].max().item()
                     
                     if (F is not None):
-                        energy_predictions, force_predictions = self.predict_cuda(Xtest, Ztest, max_natoms, forces=True, print_info=False)
+                        energy_predictions, force_predictions = self.predict(Xtest, Ztest, max_natoms, forces=True, print_info=False, use_backward=use_backward)
                     else:
-                        energy_predictions = self.predict_cuda(Xtest, Ztest, max_natoms, forces=False, print_info=False)
+                        energy_predictions = self.predict(Xtest, Ztest, max_natoms, forces=False, print_info=False, use_backward=use_backward)
                         
                     EMAE = torch.mean(torch.abs(energy_predictions - test_energies))
                     
@@ -429,15 +434,15 @@ class BaseKernel(object):
         
         start.record()
         
-        for i in tqdm(range(0, len(X), self.nbatch)) if print_info else range(0, len(X), self.nbatch):
+        for i in tqdm(range(0, len(X), self.nbatch_test)) if print_info else range(0, len(X), self.nbatch_test):
             
-            coordinates = X[i:i + self.nbatch]
-            charges = Z[i:i + self.nbatch]
+            coordinates = X[i:i + self.nbatch_test]
+            charges = Z[i:i + self.nbatch_test]
             
             zbatch = len(coordinates)
             
             if (cells is not None):
-                zcells = cells[i:i + self.nbatch]
+                zcells = cells[i:i + self.nbatch_test]
             else: zcells = None
                 
             data = self.format_data(coordinates, charges, cells=zcells)
@@ -484,11 +489,11 @@ class BaseKernel(object):
 
                 self.calculate_features(sub, e, batch_indexes, Ztest, sub_grad, Gtest_derivative)
                 
-            predict_energies[i:i + self.nbatch] = torch.matmul(Ztest, self.alpha)
+            predict_energies[i:i + self.nbatch_test] = torch.matmul(Ztest, self.alpha)
             
             if (forces is True):
                 Gtest_derivative = Gtest_derivative.reshape(zbatch * max_natoms * 3, self.nfeatures)
-                predict_forces[i:i + self.nbatch] = torch.matmul(Gtest_derivative, self.alpha).reshape(zbatch, max_natoms, 3)
+                predict_forces[i:i + self.nbatch_test] = torch.matmul(Gtest_derivative, self.alpha).reshape(zbatch, max_natoms, 3)
         
         end.record()
         torch.cuda.synchronize()
@@ -501,7 +506,7 @@ class BaseKernel(object):
         else:
             return predict_energies
     
-    def predict_torch(self):
+    def predict(self, X, Z, max_natoms, cells=None, forces=False, print_info=True, use_backwards=True):
         raise NotImplementedError("Abstract method only.")
             
     def get_reductors(self, X, Z, cells=None, npcas=128, npca_choice=256, nsamples=4096, print_info=True):
@@ -540,14 +545,14 @@ class BaseKernel(object):
             
             nselected = 0
             
-            for i in range(0, len(subsample_coordinates), self.nbatch):
+            for i in range(0, len(subsample_coordinates), self.nbatch_train):
                 
                 # only collect nsample representations to compute the SVD
                 if (nselected > nsamples):
                     break
                 
-                coordinates = subsample_coordinates[i:i + self.nbatch]
-                charges = subsample_charges[i:i + self.nbatch]
+                coordinates = subsample_coordinates[i:i + self.nbatch_train]
+                charges = subsample_charges[i:i + self.nbatch_train]
                 
                 data = self.format_data(coordinates, charges)
                 

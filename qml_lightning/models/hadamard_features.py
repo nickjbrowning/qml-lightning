@@ -17,7 +17,7 @@ from qml_lightning.representations.dimensionality_reduction import project_repre
 class HadamardFeaturesModel(BaseKernel):
     
     def __init__(self, rep=None, elements=np.array([1, 6, 7, 8]), ntransforms=1, sigma=3.0, llambda=1e-11,
-                 nfeatures=8192, npcas=128, nbatch=64):
+                 nfeatures=8192, npcas=128, nbatch_train=64, nbatch_test=64):
         
         super(HadamardFeaturesModel, self).__init__(rep, elements, sigma, llambda)
         
@@ -27,8 +27,9 @@ class HadamardFeaturesModel(BaseKernel):
         self.ntransforms = ntransforms
   
         self.nfeatures = nfeatures
-        self.nbatch = nbatch
-
+        self.nbatch_train = nbatch_train
+        self.nbatch_test = nbatch_test
+        
         self.species = torch.from_numpy(elements).float().cuda()
         
         self.feature_normalisation = np.sqrt(2.0 / nfeatures)
@@ -110,7 +111,10 @@ class HadamardFeaturesModel(BaseKernel):
                 
         return feature_derivative
     
-    def predict_torch(self, X, Z, max_natoms, cells=None, forces=False, print_info=True):
+    def predict(self, X, Z, max_natoms, cells=None, forces=True, print_info=True, use_backward=True):
+        
+        if (not use_backward):
+            return self.predict_cuda(X, Z, max_natoms, cells, forces, print_info)
         
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
@@ -131,15 +135,15 @@ class HadamardFeaturesModel(BaseKernel):
         predict_energies = torch.zeros(len(X), device=self.device, dtype=torch.float64)
         predict_forces = torch.zeros(len(X), max_natoms, 3, device=self.device, dtype=torch.float64)
 
-        for i in tqdm(range(0, len(X), self.nbatch)) if print_info else range(0, len(X), self.nbatch):
+        for i in tqdm(range(0, len(X), self.nbatch_test)) if print_info else range(0, len(X), self.nbatch_test):
             
-            coordinates = X[i:i + self.nbatch]
-            charges = Z[i:i + self.nbatch]
+            coordinates = X[i:i + self.nbatch_test]
+            charges = Z[i:i + self.nbatch_test]
             
             zbatch = len(coordinates)
             
             if (cells is not None):
-                zcells = cells[i:i + self.nbatch]
+                zcells = cells[i:i + self.nbatch_test]
             else: zcells = None
                 
             data = self.format_data(coordinates, charges, cells=zcells)
@@ -153,8 +157,8 @@ class HadamardFeaturesModel(BaseKernel):
             
             if (forces):
                 coordinates.requires_grad = True
-                
-            torch_rep = self.rep.get_representation_torch(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
+             
+            torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
             
             Ztest = torch.zeros(zbatch, self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
             
@@ -182,7 +186,7 @@ class HadamardFeaturesModel(BaseKernel):
         
             total_energies = torch.matmul(Ztest.double(), self.alpha)
             
-            predict_energies[i:i + self.nbatch] = total_energies
+            predict_energies[i:i + self.nbatch_test] = total_energies
             
             if (forces):
                 forces_cuda, = torch.autograd.grad(-total_energies.sum(), coordinates)
