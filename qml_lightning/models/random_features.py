@@ -131,7 +131,7 @@ class RandomFourrierFeaturesModel(BaseKernel):
         
         start.record()
             
-        for i in tqdm(range(0, len(X), self.nbatch_test)) if print_info else range(0, len(X), self.nbatch):
+        for i in tqdm(range(0, len(X), self.nbatch_test)) if print_info else range(0, len(X), self.nbatch_test):
             
             coordinates = X[i:i + self.nbatch_test]
             charges = Z[i:i + self.nbatch_test]
