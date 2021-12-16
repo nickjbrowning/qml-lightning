@@ -2,6 +2,378 @@
 
 using namespace std;
 
+__global__ void hadamard_kernel2(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> input,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> dmatrix,
+		torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output, const float normalisation, int log2N) {
+
+	const int N = 1 << log2N;
+
+	extern __shared__ float s[];
+
+	const float normh = normalisation * (1.0 / pow(2.0, float(log2N) / 2.0));
+	const int nstacks = input.size(1);
+
+	for (int stack = 0; stack < nstacks; stack++) {
+
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = dmatrix[0][stack][pos] * input[blockIdx.x][stack][pos];
+		}
+
+		/**Hadamard transform taken from Nvidia Cuda Examples**/
+
+		int stride = 1;
+
+		//Do single radix-2 stage for odd power of two
+		if (log2N & 1) {
+
+			__syncthreads();
+
+			for (int pos = threadIdx.x; pos < N / 2; pos += blockDim.x) {
+				int i0 = pos << 1;
+				int i1 = i0 + 1;
+
+				float D0 = s[i0];
+				float D1 = s[i1];
+				s[i0] = D0 + D1;
+				s[i1] = D0 - D1;
+			}
+			stride <<= 1;
+		}
+
+		//Main radix-4 stages
+		const int pos = threadIdx.x;
+
+		for (; stride <= N >> 2; stride <<= 2) {
+			int lo = pos & (stride - 1);
+			int i0 = ((pos - lo) << 2) + lo;
+			int i1 = i0 + stride;
+			int i2 = i1 + stride;
+			int i3 = i2 + stride;
+
+			__syncthreads();
+
+			float D0 = s[i0];
+			float D1 = s[i1];
+			float D2 = s[i2];
+			float D3 = s[i3];
+
+			float T;
+			T = D0;
+			D0 = D0 + D2;
+			D2 = T - D2;
+			T = D1;
+			D1 = D1 + D3;
+			D3 = T - D3;
+			T = D0;
+			s[i0] = D0 + D1;
+			s[i1] = T - D1;
+			T = D2;
+			s[i2] = D2 + D3;
+			s[i3] = T - D3;
+		}
+
+		__syncthreads();
+
+		/**Finished Hadamard transform for subblock N/d.*/
+
+		//normalize hadamard transform
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = normh * s[pos];
+		}
+
+		__syncthreads();
+
+		//save [HD]n stack to global memory
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			output[blockIdx.x][stack][pos] = s[pos];
+		}
+	}
+}
+
+__global__ void hadamard_kernel2_backwards(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> input,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> dmatrix,
+		torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output, const float normalisation, int log2N) {
+
+	const int N = 1 << log2N;
+
+	extern __shared__ float s[];
+
+	const float normh = normalisation * (1.0 / pow(2.0, float(log2N) / 2.0));
+	const int nstacks = input.size(1);
+
+	for (int stack = 0; stack < nstacks; stack++) {
+
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = input[blockIdx.x][stack][pos];
+		}
+
+		/**Hadamard transform taken from Nvidia Cuda Examples**/
+
+		int stride = 1;
+
+		//Do single radix-2 stage for odd power of two
+		if (log2N & 1) {
+
+			__syncthreads();
+
+			for (int pos = threadIdx.x; pos < N / 2; pos += blockDim.x) {
+				int i0 = pos << 1;
+				int i1 = i0 + 1;
+
+				float D0 = s[i0];
+				float D1 = s[i1];
+				s[i0] = D0 + D1;
+				s[i1] = D0 - D1;
+			}
+			stride <<= 1;
+		}
+
+		//Main radix-4 stages
+		const int pos = threadIdx.x;
+
+		for (; stride <= N >> 2; stride <<= 2) {
+			int lo = pos & (stride - 1);
+			int i0 = ((pos - lo) << 2) + lo;
+			int i1 = i0 + stride;
+			int i2 = i1 + stride;
+			int i3 = i2 + stride;
+
+			__syncthreads();
+
+			float D0 = s[i0];
+			float D1 = s[i1];
+			float D2 = s[i2];
+			float D3 = s[i3];
+
+			float T;
+			T = D0;
+			D0 = D0 + D2;
+			D2 = T - D2;
+			T = D1;
+			D1 = D1 + D3;
+			D3 = T - D3;
+			T = D0;
+			s[i0] = D0 + D1;
+			s[i1] = T - D1;
+			T = D2;
+			s[i2] = D2 + D3;
+			s[i3] = T - D3;
+		}
+
+		__syncthreads();
+
+		/**Finished Hadamard transform for subblock N/d.*/
+
+		//normalize hadamard transform
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = normh * s[pos];
+		}
+
+		__syncthreads();
+
+		//save [HD]n stack to global memory
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			output[blockIdx.x][stack][pos] = dmatrix[0][stack][pos] * s[pos];
+		}
+	}
+}
+
+__global__ void hadamard_kernel3(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> input,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> dmatrix,
+		torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output, const float normalisation, int log2N) {
+
+	const int N = 1 << log2N;
+
+	extern __shared__ float s[];
+
+	const float normh = normalisation * (1.0 / pow(2.0, float(log2N) / 2.0));
+	const int nstacks = dmatrix.size(1);
+
+	//s_0[N]
+	//s_1[N]
+
+	int ystart = threadIdx.y * N;
+
+	for (int stack = threadIdx.y; stack < nstacks; stack += blockDim.y) {
+
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+
+			s[ystart + pos] = dmatrix[0][stack][pos] * input[blockIdx.x][pos];
+		}
+
+		/**Hadamard transform taken from Nvidia Cuda Examples**/
+
+		int stride = 1;
+
+		//Do single radix-2 stage for odd power of two
+		if (log2N & 1) {
+
+			__syncthreads();
+
+			for (int pos = threadIdx.x; pos < N / 2; pos += blockDim.x) {
+
+				int i0 = ystart + (pos << 1);
+				int i1 = ystart + i0 + 1;
+
+				float D0 = s[i0];
+				float D1 = s[i1];
+				s[i0] = D0 + D1;
+				s[i1] = D0 - D1;
+			}
+			stride <<= 1;
+		}
+
+		//Main radix-4 stages
+		const int pos = threadIdx.x;
+
+		for (; stride <= N >> 2; stride <<= 2) {
+
+			int lo = pos & (stride - 1);
+			int i0 = ystart + ((pos - lo) << 2) + lo;
+			int i1 = ystart + i0 + stride;
+			int i2 = ystart + i1 + stride;
+			int i3 = ystart + i2 + stride;
+
+			__syncthreads();
+
+			float D0 = s[i0];
+			float D1 = s[i1];
+			float D2 = s[i2];
+			float D3 = s[i3];
+
+			float T;
+			T = D0;
+			D0 = D0 + D2;
+			D2 = T - D2;
+			T = D1;
+			D1 = D1 + D3;
+			D3 = T - D3;
+			T = D0;
+			s[i0] = D0 + D1;
+			s[i1] = T - D1;
+			T = D2;
+			s[i2] = D2 + D3;
+			s[i3] = T - D3;
+		}
+
+		__syncthreads();
+
+		/**Finished Hadamard transform for subblock N/d.*/
+
+		//normalize hadamard transform
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[ystart + pos] = normh * s[ystart + pos];
+		}
+
+		__syncthreads();
+
+		//save [HD]n stack to global memory
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			output[blockIdx.x][stack][ystart + pos] = s[ystart + pos];
+		}
+	}
+}
+
+__global__ void hadamard_kernel3_backwards(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> input,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> dmatrix,
+		torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> output, const float normalisation, int log2N) {
+
+	const int N = 1 << log2N;
+
+	extern __shared__ float s[];
+
+	float *sout = (float*) &s[N];
+
+	const float normh = normalisation * (1.0 / pow(2.0, float(log2N) / 2.0));
+	const int nstacks = dmatrix.size(1);
+
+	for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+		sout[pos] = 0.0;
+
+	}
+
+	__syncthreads();
+
+	for (int stack = 0; stack < nstacks; stack += 1) {
+
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = input[blockIdx.x][stack][pos];
+		}
+
+		/**Hadamard transform taken from Nvidia Cuda Examples**/
+
+		int stride = 1;
+
+		//Do single radix-2 stage for odd power of two
+		if (log2N & 1) {
+
+			__syncthreads();
+
+			for (int pos = threadIdx.x; pos < N / 2; pos += blockDim.x) {
+
+				int i0 = pos << 1;
+				int i1 = i0 + 1;
+
+				float D0 = s[i0];
+				float D1 = s[i1];
+				s[i0] = D0 + D1;
+				s[i1] = D0 - D1;
+			}
+			stride <<= 1;
+		}
+
+		//Main radix-4 stages
+		const int pos = threadIdx.x;
+
+		for (; stride <= N >> 2; stride <<= 2) {
+
+			int lo = pos & (stride - 1);
+			int i0 = ((pos - lo) << 2) + lo;
+			int i1 = i0 + stride;
+			int i2 = i1 + stride;
+			int i3 = i2 + stride;
+
+			__syncthreads();
+
+			float D0 = s[i0];
+			float D1 = s[i1];
+			float D2 = s[i2];
+			float D3 = s[i3];
+
+			float T;
+			T = D0;
+			D0 = D0 + D2;
+			D2 = T - D2;
+			T = D1;
+			D1 = D1 + D3;
+			D3 = T - D3;
+			T = D0;
+			s[i0] = D0 + D1;
+			s[i1] = T - D1;
+			T = D2;
+			s[i2] = D2 + D3;
+			s[i3] = T - D3;
+		}
+
+		__syncthreads();
+
+		/**Finished Hadamard transform for subblock N/d.*/
+
+		//normalize hadamard transform
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			sout[pos] += dmatrix[0][stack][pos] * normh * s[pos];
+		}
+
+		__syncthreads();
+
+	}
+
+	//save [HD]n stack to global memory
+	for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+		output[blockIdx.x][pos] = sout[pos];
+	}
+}
+
 __global__ void hadamard_kernel(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> input,
 		torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output, int log2N) {
 
@@ -87,6 +459,263 @@ __global__ void hadamard_kernel(const torch::PackedTensorAccessor32<float, 3, to
 			output[blockIdx.x][stack][pos] = s[pos];
 		}
 	}
+}
+
+//torch::Tensor sub, torch::Tensor D, torch::Tensor b, float coeff_normalisation, torch::Tensor batch_indexes, torch::Tensor output
+__global__ void sorf_features_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> input,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> D, const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> b,
+		const float coefficient_normalisation, const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> batch_indexes, int log2N,
+		torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> output) {
+
+	const int N = 1 << log2N;
+
+	extern __shared__ float s[];
+
+	const float normh = coefficient_normalisation * (1.0 / pow(2.0, float(log2N) / 2.0));
+	const int nstacks = D.size(1);
+	const float feature_normalisation = sqrtf(2.0 / (nstacks * N));
+
+	int batchID = batch_indexes[blockIdx.x];
+
+	for (int stack = 0; stack < nstacks; stack++) {
+
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = D[0][stack][pos] * input[blockIdx.x][pos];
+		}
+
+		int stride = 1;
+
+		//Do single radix-2 stage for odd power of two
+		if (log2N & 1) {
+
+			__syncthreads();
+
+			for (int pos = threadIdx.x; pos < N / 2; pos += blockDim.x) {
+				int i0 = pos << 1;
+				int i1 = i0 + 1;
+
+				float D0 = s[i0];
+				float D1 = s[i1];
+				s[i0] = D0 + D1;
+				s[i1] = D0 - D1;
+			}
+			stride <<= 1;
+		}
+
+		//Main radix-4 stages
+		const int pos = threadIdx.x;
+
+		for (; stride <= N >> 2; stride <<= 2) {
+			int lo = pos & (stride - 1);
+			int i0 = ((pos - lo) << 2) + lo;
+			int i1 = i0 + stride;
+			int i2 = i1 + stride;
+			int i3 = i2 + stride;
+
+			__syncthreads();
+
+			float D0 = s[i0];
+			float D1 = s[i1];
+			float D2 = s[i2];
+			float D3 = s[i3];
+
+			float T;
+			T = D0;
+			D0 = D0 + D2;
+			D2 = T - D2;
+			T = D1;
+			D1 = D1 + D3;
+			D3 = T - D3;
+			T = D0;
+			s[i0] = D0 + D1;
+			s[i1] = T - D1;
+			T = D2;
+			s[i2] = D2 + D3;
+			s[i3] = T - D3;
+		}
+
+		__syncthreads();
+
+		/**Finished Hadamard transform for subblock N/d.*/
+
+		//normalize hadamard transform
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = normh * s[pos];
+		}
+
+		__syncthreads();
+
+		//save [HD]n stack to global memory
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			atomicAdd(&output[batchID][stack * N + pos], feature_normalisation * cosf(s[pos] + b[stack * N + pos]));
+		}
+	}
+}
+
+__global__ void sorf_features_backwards_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> grads,
+		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> input,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> D, const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> bias,
+		const float normalisation, const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> batch_indexes, int log2N,
+		torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> output) {
+
+	const int N = 1 << log2N;
+
+	extern __shared__ float s[];
+	float *stmp = (float*) &s[N];
+	float *sout = (float*) &stmp[N];
+
+	const int nfeatures = grads.size(1);
+	const float normf = sqrt(2.0 / float(nfeatures));
+	const float normh = normalisation * (1.0 / pow(2.0, float(log2N) / 2.0));
+	const int nstacks = D.size(1);
+
+	int batchID = batch_indexes[blockIdx.x];
+
+	for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+		sout[pos] = 0.0;
+		stmp[pos] = 0.0;
+	}
+
+	__syncthreads();
+
+	for (int stack = 0; stack < nstacks; stack++) {
+
+		for (int pos = threadIdx.x; pos < N; pos += blockDim.x) {
+			s[pos] = input[blockIdx.x][pos];
+		}
+
+		/**Hadamard transform taken from Nvidia Cuda Examples**/
+
+		int stride = 1;
+
+		//Do single radix-2 stage for odd power of two
+		if (log2N & 1) {
+
+			__syncthreads();
+
+			for (int pos = threadIdx.x; pos < N / 2; pos += blockDim.x) {
+				int i0 = pos << 1;
+				int i1 = i0 + 1;
+
+				float D0 = s[i0];
+				float D1 = s[i1];
+				s[i0] = D0 + D1;
+				s[i1] = D0 - D1;
+			}
+			stride <<= 1;
+		}
+
+		//Main radix-4 stages
+		int pos = threadIdx.x;
+
+		for (; stride <= N >> 2; stride <<= 2) {
+			int lo = pos & (stride - 1);
+			int i0 = ((pos - lo) << 2) + lo;
+			int i1 = i0 + stride;
+			int i2 = i1 + stride;
+			int i3 = i2 + stride;
+
+			__syncthreads();
+
+			float D0 = s[i0];
+			float D1 = s[i1];
+			float D2 = s[i2];
+			float D3 = s[i3];
+
+			float T;
+			T = D0;
+			D0 = D0 + D2;
+			D2 = T - D2;
+			T = D1;
+			D1 = D1 + D3;
+			D3 = T - D3;
+			T = D0;
+			s[i0] = D0 + D1;
+			s[i1] = T - D1;
+			T = D2;
+			s[i2] = D2 + D3;
+			s[i3] = T - D3;
+		}
+
+		__syncthreads();
+
+		//&features[blockIdx.x][N], grads[batchID][N] * -sinf(coefficients[iatom][N] + bias[N]) * normf);
+
+		for (int i = threadIdx.x; i < N; i += blockDim.x) {
+			int idx = stack * N + i;
+
+			stmp[i] += grads[batchID][idx] * -sinf(normh * s[i] + bias[idx]) * normf;
+
+		}
+
+		//transform s again
+
+		stride = 1;
+
+		//Do single radix-2 stage for odd power of two
+		if (log2N & 1) {
+
+			__syncthreads();
+
+			for (int pos = threadIdx.x; pos < N / 2; pos += blockDim.x) {
+				int i0 = pos << 1;
+				int i1 = i0 + 1;
+
+				float D0 = s[i0];
+				float D1 = s[i1];
+				s[i0] = D0 + D1;
+				s[i1] = D0 - D1;
+			}
+			stride <<= 1;
+		}
+
+		//Main radix-4 stages
+		pos = threadIdx.x;
+
+		for (; stride <= N >> 2; stride <<= 2) {
+			int lo = pos & (stride - 1);
+			int i0 = ((pos - lo) << 2) + lo;
+			int i1 = i0 + stride;
+			int i2 = i1 + stride;
+			int i3 = i2 + stride;
+
+			__syncthreads();
+
+			float D0 = s[i0];
+			float D1 = s[i1];
+			float D2 = s[i2];
+			float D3 = s[i3];
+
+			float T;
+			T = D0;
+			D0 = D0 + D2;
+			D2 = T - D2;
+			T = D1;
+			D1 = D1 + D3;
+			D3 = T - D3;
+			T = D0;
+			s[i0] = D0 + D1;
+			s[i1] = T - D1;
+			T = D2;
+			s[i2] = D2 + D3;
+			s[i3] = T - D3;
+		}
+
+		__syncthreads();
+
+		for (int i = threadIdx.x; i < N; i += blockDim.x) {
+			sout[i] += D[0][stack][i] * normh * s[i];
+		}
+
+		__syncthreads();
+
+	}
+
+	//save [HD]n stack to global memory
+	for (int i = threadIdx.x; i < N; i += blockDim.x) {
+		output[blockIdx.x][i] = sout[i];
+	}
+
 }
 
 __global__ void sorf_matrix_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> input,
@@ -388,7 +1017,200 @@ void hadamard_gpu(torch::Tensor input, torch::Tensor output) {
 	TORCH_CHECK(n == 1 << log2N, "input size must be power of 2.");
 
 	hadamard_kernel<<<curBatchSize, (n+3)/4, n * sizeof(float)>>>(input.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-			output.packed_accessor32<float, 3, torch::RestrictPtrTraits>(), log2N);
+			output.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),log2N);
+
+	cudaDeviceSynchronize();
+}
+
+void hadamard_gpu2(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation) {
+
+	int n = input.size(2);
+	int log2N = int(log2(n));
+
+	int curBatchSize = input.size(0);
+
+	TORCH_CHECK(n == 1 << log2N, "input size must be power of 2.");
+
+	hadamard_kernel2<<<curBatchSize, (n+3)/4, n * sizeof(float)>>>(input.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			dmatrix.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			output.packed_accessor32<float, 3, torch::RestrictPtrTraits>(), normalisation,log2N);
+
+	cudaDeviceSynchronize();
+}
+
+void hadamard_backwards_gpu2(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation) {
+
+	int n = input.size(2);
+	int log2N = int(log2(n));
+
+	int curBatchSize = input.size(0);
+
+	TORCH_CHECK(n == 1 << log2N, "input size must be power of 2.");
+
+	hadamard_kernel2_backwards<<<curBatchSize, (n+3)/4, n * sizeof(float)>>>(input.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			dmatrix.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			output.packed_accessor32<float, 3, torch::RestrictPtrTraits>(), normalisation,log2N);
+
+	cudaDeviceSynchronize();
+}
+
+void hadamard_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation) {
+
+	int n = input.size(1);
+	int log2N = int(log2(n));
+	const int nthreadsy = 2;
+
+	int curBatchSize = input.size(0);
+
+	dim3 blocks(curBatchSize);
+
+	dim3 grid((n + 3) / 4, nthreadsy);
+
+	TORCH_CHECK(n == 1 << log2N, "input size must be power of 2.");
+
+	hadamard_kernel3<<<blocks,grid, nthreadsy * n * sizeof(float)>>>(input.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+			dmatrix.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			output.packed_accessor32<float, 3, torch::RestrictPtrTraits>(), normalisation,log2N);
+
+	cudaDeviceSynchronize();
+}
+
+void hadamard_backwards_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation) {
+
+	int n = input.size(2);
+	int log2N = int(log2(n));
+
+	const int nthreadsy = 1;
+
+	int curBatchSize = input.size(0);
+
+	dim3 blocks(curBatchSize);
+
+	dim3 grid((n + 3) / 4, nthreadsy);
+
+	TORCH_CHECK(n == 1 << log2N, "input size must be power of 2.");
+
+	hadamard_kernel3_backwards<<<blocks, grid, (nthreadsy+1) * n * sizeof(float)>>>(input.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			dmatrix.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			output.packed_accessor32<float, 2, torch::RestrictPtrTraits>(), normalisation,log2N);
+
+	cudaDeviceSynchronize();
+}
+
+__global__ void compute_cos_features_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> coefficients,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> bias,
+		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> ordering,
+		torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> features) {
+
+//coefficients: natoms, nfeatures
+//features nbatch, nfeatures
+//ordering: contains the indexes of which nbatch to add atom j to.
+
+	int nfeatures = coefficients.size(1);
+	int natoms = coefficients.size(0);
+
+	int iatom = blockIdx.x;
+
+	int batchID = ordering[iatom];
+
+	const float normf = sqrt(2.0 / float(nfeatures));
+
+	for (int N = threadIdx.x; N < nfeatures; N += blockDim.x) {
+		atomicAdd(&features[batchID][N], cosf(coefficients[iatom][N] + bias[N]) * normf);
+	}
+}
+
+void cos_features_gpu(torch::Tensor coeffs, torch::Tensor b, torch::Tensor batch_indexes, torch::Tensor output) {
+
+	int curBatchSize = coeffs.size(0);
+
+	const int nthreadsx = 128;
+
+	compute_cos_features_kernel<<<curBatchSize,nthreadsx>>>(coeffs.packed_accessor32<float,2, torch::RestrictPtrTraits>(),
+			b.packed_accessor32<float,1, torch::RestrictPtrTraits>(),
+			batch_indexes.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			output.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+
+	cudaDeviceSynchronize();
+}
+
+__global__ void compute_cos_derivative_features_kernel(const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> grads,
+		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> coefficients,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> bias,
+		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> ordering,
+		torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> features) {
+
+//coefficients: natoms, nfeatures
+//features nbatch, nfeatures
+//ordering: contains the indexes of which nbatch to add atom j to.
+
+	int nfeatures = coefficients.size(1);
+	int natoms = coefficients.size(0);
+
+	int iatom = blockIdx.x;
+
+	int batchID = ordering[iatom];
+
+	const float normf = sqrt(2.0 / float(nfeatures));
+
+	for (int N = threadIdx.x; N < nfeatures; N += blockDim.x) {
+		atomicAdd(&features[blockIdx.x][N], grads[batchID][N] * -sinf(coefficients[iatom][N] + bias[N]) * normf);
+	}
+}
+
+void cos_derivative_features_gpu(torch::Tensor grads, torch::Tensor coeffs, torch::Tensor b, torch::Tensor batch_indexes, torch::Tensor output) {
+
+	int curBatchSize = coeffs.size(0);
+
+	const int nthreadsx = 128;
+
+	compute_cos_derivative_features_kernel<<<curBatchSize,nthreadsx>>>(grads.packed_accessor32<float,2, torch::RestrictPtrTraits>(),
+			coeffs.packed_accessor32<float,2, torch::RestrictPtrTraits>(),
+			b.packed_accessor32<float,1, torch::RestrictPtrTraits>(),
+			batch_indexes.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			output.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+
+	cudaDeviceSynchronize();
+}
+
+void sorf_features_cuda(torch::Tensor sub, torch::Tensor D, torch::Tensor b, float coeff_normalisation, torch::Tensor batch_indexes, torch::Tensor output) {
+
+	int n = sub.size(1);
+	int log2N = int(log2(n));
+
+	int curBatchSize = sub.size(0);
+
+	TORCH_CHECK(n == 1 << log2N, "input size must be power of 2.");
+
+	sorf_features_kernel<<<curBatchSize, (n+3)/4, n * sizeof(float)>>>(sub.packed_accessor32<float,2, torch::RestrictPtrTraits>(),
+			D.packed_accessor32<float,3, torch::RestrictPtrTraits>(),
+			b.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			coeff_normalisation,
+			batch_indexes.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			log2N,
+			output.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+
+	cudaDeviceSynchronize();
+}
+
+void sorf_features_backwards_cuda(torch::Tensor grad, torch::Tensor sub, torch::Tensor D, torch::Tensor b, float coeff_normalisation,
+		torch::Tensor batch_indexes, torch::Tensor output) {
+
+	int n = sub.size(1);
+	int log2N = int(log2(n));
+
+	int curBatchSize = sub.size(0);
+
+	TORCH_CHECK(n == 1 << log2N, "input size must be power of 2.");
+
+	sorf_features_backwards_kernel<<<curBatchSize, (n+3)/4, 3*n * sizeof(float)>>>(grad.packed_accessor32<float,2, torch::RestrictPtrTraits>(),
+			sub.packed_accessor32<float,2, torch::RestrictPtrTraits>(),
+			D.packed_accessor32<float,3, torch::RestrictPtrTraits>(),
+			b.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			coeff_normalisation,
+			batch_indexes.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			log2N,
+			output.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
 
 	cudaDeviceSynchronize();
 }

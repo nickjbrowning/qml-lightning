@@ -256,10 +256,12 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 		selement_types[jatom] = element_types[molID][j];
 
 	}
+	__syncthreads();
 
 	for (int i = threadIdx.x; i < nRs2; i += blockDim.x) {
 		sRs2[i] = Rs2[i];
 	}
+	__syncthreads();
 
 	for (int i = threadIdx.x; i < nRs3; i += blockDim.x) {
 		sRs3[i] = Rs3[i];
@@ -301,9 +303,6 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 
 		float mu = log(rij / sqrt(1.0 + eta2 / powf(rij, 2.0)));
 		float sigma = sqrt(log(1.0 + eta2 / powf(rij, 2.0)));
-
-		//radial(k) = 1.0d0/(sigma* sqrt(2.0d0*pi) * Rs2(k)) * rdecay(i,j) &
-		//& * expf( - (log(Rs2(k)) - mu)**2 / (2.0d0 * sigma**2) ) / rij**two_body_decay
 
 		for (int z = 0; z < nRs2; z++) {
 

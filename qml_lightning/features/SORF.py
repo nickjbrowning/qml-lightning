@@ -12,6 +12,83 @@ import numpy as np
 from qml_lightning.cuda import sorf_gpu
 
 
+class SORFTransformCuda2(torch.autograd.Function):
+    ''' 
+        Wrapper for forward/backward hadamard transforms for pytorch autograd support.
+        
+    '''
+
+    @staticmethod
+    def forward(ctx, u, d, coeff_normalisation):
+
+        ctx.save_for_backward(d)
+        ctx.coeff_normalisation = coeff_normalisation
+        
+        return sorf_gpu.hadamard_transform_gpu2(u, d, coeff_normalisation)
+
+    @staticmethod
+    def backward(ctx, grad):
+
+        d = ctx.saved_tensors[0]
+        
+        # print ("--grad--")
+        
+        # print (grad.shape)
+        # print (grad)
+        
+        # d_new = torch.ones_like(d)
+        
+        # grads = d * sorf_gpu.hadamard_transform_gpu2(grad, d_new, ctx.coeff_normalisation)
+        
+        grads = sorf_gpu.hadamard_transform_backwards_gpu2(grad, d, ctx.coeff_normalisation) 
+        # print ("transform: ")
+        # print (grads.shape)
+        # print (grads)
+        
+        return grads, None, None
+    
+
+class SORFTransformCuda3(torch.autograd.Function):
+    ''' 
+        Wrapper for forward/backward hadamard transforms for pytorch autograd support.
+        
+    '''
+
+    @staticmethod
+    def forward(ctx, u, d, coeff_normalisation):
+
+        ctx.save_for_backward(d)
+        ctx.coeff_normalisation = coeff_normalisation
+        
+        # print (u.shape)
+        
+        return sorf_gpu.hadamard_transform_gpu3(u, d, coeff_normalisation)
+
+    @staticmethod
+    def backward(ctx, grad):
+
+        d = ctx.saved_tensors[0]
+        
+#         print ("--SORFTransformCuda3 input grad--", grad.shape)
+#     
+#         print (grad)
+#         
+#         # d_new = torch.ones_like(d)
+#         
+#         # grads = d * sorf_gpu.hadamard_transform_gpu2(grad, d_new, ctx.coeff_normalisation)
+#         
+        grads = sorf_gpu.hadamard_transform_backwards_gpu3(grad, d, ctx.coeff_normalisation) 
+#         # print ("transform: ")
+#         # print (grads.shape)
+#         # print (grads)
+#         
+#         print ("--SORFTransformCuda3 output grad--", grad.shape)
+#     
+#         print (grads)
+#         
+        return grads, None, None
+    
+
 class SORFTransformCuda(torch.autograd.Function):
     ''' 
         Wrapper for forward/backward hadamard transforms for pytorch autograd support.
@@ -20,16 +97,109 @@ class SORFTransformCuda(torch.autograd.Function):
     
     @staticmethod
     def forward(ctx, u):
-        
+
         return sorf_gpu.hadamard_transform_gpu(u)
 
     @staticmethod
     def backward(ctx, grad):
 
+        # print ("--grad--")
+        
+        # print (grad.shape)
+        # print (grad)
+        
         grads = sorf_gpu.hadamard_transform_gpu(grad)
         
-        return grads
+        # print ("transform: ")
+        # print (grads.shape)
+        # print (grads)
         
+        return grads
+
+      
+class CosFeatures(torch.autograd.Function):
+    ''' 
+        Wrapper for forward/backward structured orthogonal random feature transforms for pytorch autograd support.
+        
+    '''
+    
+    @staticmethod
+    def forward(ctx, coeffs, b, nmol, batch_indexes):
+        
+        ctx.save_for_backward(coeffs, b, batch_indexes)
+        ctx.nmol = nmol
+        
+        features = sorf_gpu.CosFeaturesCUDA(coeffs, b, nmol, batch_indexes)
+        
+        # print ("features:", features.shape)
+        return features
+
+    @staticmethod
+    def backward(ctx, grad):
+
+        coeffs, b, batch_indexes = ctx.saved_tensors
+        
+        # print ("inp grad:", grad.shape)
+        # print (grad)
+
+        # print ("--CosFeatures grad--", grad.shape)
+    
+        # print (grad)
+        
+        grads = sorf_gpu.CosDerivativeFeaturesCUDA(grad, coeffs, b, ctx.nmol, batch_indexes)
+        
+        # print (grads.shape)
+        # print ("outp grad:", grads.shape)
+        # print (grads)
+        
+        # print ("--CosFeatures output grad--", grads.shape)
+    
+        # print (grads)
+        
+        return grads, None, None, None
+
+        
+class SORFFeatures(torch.autograd.Function):
+    ''' 
+        Wrapper for forward/backward structured orthogonal random feature transforms for pytorch autograd support.
+        
+    '''
+    
+    @staticmethod
+    def forward(ctx, sub, D, b, coeff_normalisation, nmol, batch_indexes):
+        
+        ctx.save_for_backward(sub, D, b, batch_indexes)
+        ctx.coeff_normalisation = coeff_normalisation
+        ctx.nmol = nmol
+        
+        features = sorf_gpu.SORFFeaturesCUDA(sub, D, b, coeff_normalisation, nmol, batch_indexes)
+        
+        # print ("features:", features.shape)
+        return features
+
+    @staticmethod
+    def backward(ctx, grad):
+
+        # grad is -alphas, repeated nmol times
+        
+        sub, D, b, batch_indexes = ctx.saved_tensors
+        
+        # print ("inp grad:", grad.shape)
+        # print (grad)
+        
+        # print (sub.shape)
+        # print (grad.shape)
+        # print (D.shape)
+        # print (b.shape)
+        grads = sorf_gpu.SORFFeaturesBackwardsCUDA(grad, sub, D, b, ctx.coeff_normalisation, ctx.nmol, batch_indexes)
+        
+        # print (grads.shape)
+        # print ("outp grad:", grads.shape)
+        # print (grads)
+        # print ("feature grads:", grads)
+        
+        return grads, None, None, None, None, None
+
 
 def get_SORF_diagonals(elements, ntransforms, nfeatures, npcas):
     

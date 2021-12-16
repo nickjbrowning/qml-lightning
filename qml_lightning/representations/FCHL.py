@@ -52,7 +52,7 @@ class FCHLFunction(torch.autograd.Function):
         ctx.three_body_weight = three_body_weight
         ctx.three_body_decay = three_body_decay 
         ctx.rcut = rcut
-        
+
         output = fchl_gpu.get_fchl_representation(X, Z, species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
                                Rs2, Rs3, eta2, eta3, two_body_decay, three_body_weight, three_body_decay,
                                rcut)

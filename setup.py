@@ -78,12 +78,21 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
          extra_compile_args={'cxx': [optimisation_level],
                             'nvcc': [optimisation_level, '-ftz=true']})
     
+    utils_extension = CUDAExtension(
+        '.cuda.utils_gpu', [
+            'qml_lightning/cuda/utils_cuda.cpp',
+            'qml_lightning/cuda/utils_kernel.cu'
+        ],
+         extra_compile_args={'cxx': [optimisation_level],
+                            'nvcc': [optimisation_level, '-ftz=true']})
+    
     ext_modules.append(gto_extension)
     ext_modules.append(hd_extension)
     ext_modules.append(pairlist_extension)
     ext_modules.append(fchl_extension)
     ext_modules.append(rff_extension)
     ext_modules.append(operator_extension)
+    ext_modules.append(utils_extension)
     
 else:
     print("ERROR: cuda not available, or CUDA_HOME not set.")
