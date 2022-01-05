@@ -241,12 +241,15 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 
 	float *sRs2 = (float*) &selement_types[max_neighbours];
 	float *sRs3 = (float*) &sRs2[nRs2];
+	//float *sRep = (float*) &sRs3[nRs3];
+
+	//int repsize = nelements * nRs2 + (nelements * (nelements + 1)) * nRs3;
 
 	int molID = blockMolIDs[blockIdx.x];
 	int iatom = blockAtomIDs[blockIdx.x];
 	int nneighbours_i = nneighbours[molID][iatom];
 
-	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
+	for (int jatom = threadIdx.y * blockDim.x + threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x * blockDim.y) {
 
 		int j = neighbourlist[molID][iatom][jatom];
 
@@ -256,14 +259,15 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 		selement_types[jatom] = element_types[molID][j];
 
 	}
+
 	__syncthreads();
 
-	for (int i = threadIdx.x; i < nRs2; i += blockDim.x) {
+	for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < nRs2; i += blockDim.x * blockDim.y) {
 		sRs2[i] = Rs2[i];
 	}
 	__syncthreads();
 
-	for (int i = threadIdx.x; i < nRs3; i += blockDim.x) {
+	for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < nRs3; i += blockDim.x * blockDim.y) {
 		sRs3[i] = Rs3[i];
 	}
 
@@ -282,6 +286,8 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 	ri[2] = coordinates[molID][iatom][2];
 
 	float ielement = element_types[molID][iatom];
+
+	float expf_v = expf(-powf(M_PI, 2) * 0.5);
 
 	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
 
@@ -312,7 +318,7 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 
 		}
 
-		for (int katom = jatom + 1; katom < nneighbours_i; katom++) {
+		for (int katom = jatom + 1 + threadIdx.y; katom < nneighbours_i; katom += blockDim.y) {
 
 			rk[0] = scoords_x[katom];
 			rk[1] = scoords_y[katom];
@@ -337,15 +343,15 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 			float rjk = sqrt(drjk[0] * drjk[0] + drjk[1] * drjk[1] + drjk[2] * drjk[2]);
 
 			float rcutik = get_cutoff(rik, rcut, 0.0, 0);
-			float angle = calc_angle(rj, ri, rk); // ji, ki
+			float angle = calc_angle(rj, ri, rk);
 			float cos_1 = calc_cos_angle(rj, ri, rk); // ji, ki
 			float cos_2 = calc_cos_angle(rj, rk, ri); // jk, ik
 			float cos_3 = calc_cos_angle(ri, rj, rk); // ij, kj
 
 			float ksi3 = three_body_weight * (1.0 + 3 * cos_1 * cos_2 * cos_3) / powf(rij * rik * rjk, three_body_decay);
 
-			float cos_angle = expf(-powf(M_PI, 2) * 0.5) * 2.0 * cosf(angle);
-			float sin_angle = expf(-powf(M_PI, 2) * 0.5) * 2.0 * sinf(angle);
+			float cos_angle = expf_v * 2.0 * cosf(angle);
+			float sin_angle = expf_v * 2.0 * sinf(angle);
 
 			int p = min(jelement, kelement);
 			int q = max(jelement, kelement);
@@ -364,14 +370,18 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 			}
 		}
 	}
+
+	//for (int i = threadIdx.x; i < repsize; i += blockDim.x) {
+	//	output[molID][iatom][i] = sRep[i];
+	//}
 }
 
 __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
 		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
-		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs, // blockIdx -> atom idx
-		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs, // blockIdx -> molecule jdx
+		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs,
+		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs,
 		const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
 		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> nneighbours, const int max_neighbours,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> Rs2,
@@ -1249,18 +1259,25 @@ void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3,
 		float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output) {
 
-	const int nthreads = 32;
+	const int nthreadsx = 64;
+	const int nthreadsy = 1;
 
 	int nRs2 = Rs2.size(0);
 	int nRs3 = Rs3.size(0);
 	int nspecies = species.size(0);
 
+	//int repsize = nspecies * nRs2 + (nspecies * (nspecies + 1)) * nRs3;
+
 	const int currBatch = blockAtomIDs.size(0);
 	const int max_neighbours = nneighbours.max().item<int>();
 
-	int shared_mem_size = nRs2 + nRs3 + 4 * max_neighbours;
+	dim3 blocks(currBatch);
 
-	fchl19_representation_cuda<<<currBatch, nthreads, shared_mem_size * sizeof(float)>>>(
+	dim3 grid(nthreadsx, nthreadsy);
+
+	int shared_mem_size = nRs2 + nRs3 + 4 * max_neighbours; //+ repsize;
+
+	fchl19_representation_cuda<<<blocks, grid, shared_mem_size * sizeof(float)>>>(
 			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),

@@ -4,14 +4,17 @@ Created on 22 Jun 2021
 @author: Nicholas J. Browning
 '''
 import torch
+
 import numpy as np
 from qml_lightning.representations.dimensionality_reduction import project_representation, project_derivative
 from tqdm import tqdm
 
 
-class BaseKernel(object):
+class BaseKernel(torch.nn.Module):
  
     def __init__(self, rep, elements, sigma, llambda):
+        
+        super(BaseKernel, self).__init__()
         
         self.self_energy = None
         
@@ -342,6 +345,9 @@ class BaseKernel(object):
         
         del ZtrainY
         del ZTZ
+        
+        self.is_trained = True
+        
         torch.cuda.empty_cache()
     
     def hyperparam_opt_nested_cv(self, X, Z, E, F=None, sigmas=np.linspace(1.5, 12.5, 10), lambdas=np.logspace(-11, -5, 9), kfolds=5, print_info=True, use_backward=True):
@@ -427,13 +433,16 @@ class BaseKernel(object):
             print ("Best MAE: ", errors[min_idx], "sigma = ", best_sigma, "lambda = ", best_llambda)
         
         return best_sigma, best_llambda
+    
+    def forward(self, X, Z, max_natoms, cells=None, forces=False, print_info=False, use_backward=True):
+        raise NotImplementedError("Abstract method only.")
         
     def predict_cuda(self, X, Z, max_natoms, cells=None, forces=False, print_info=True):
         
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         
-        if (self.alpha is None):
+        if (self.is_trained is False):
             print ("Error: must train the model first by calling train()!")
             exit()
         
@@ -573,7 +582,7 @@ class BaseKernel(object):
                 indexes = qs == e
                 
                 gto = self.rep.get_representation(coords, qs, atomIDs, molIDs, natom_counts)
-         
+                
                 sub = gto[indexes]
             
                 if (sub.shape[0] == 0):

@@ -16,15 +16,10 @@ void compute_partial_feature_derivatives(torch::Tensor sorf_matrix, torch::Tenso
 void hadamard_gpu2(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation);
 void hadamard_backwards_gpu2(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation);
 
-void hadamard_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation);
-void hadamard_backwards_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation);
+void hadamard_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
+void hadamard_backwards_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
 
 void hadamard_gpu(torch::Tensor input, torch::Tensor output);
-
-void sorf_features_cuda(torch::Tensor sub, torch::Tensor D, torch::Tensor b, float coeff_normalisation, torch::Tensor batch_indexes, torch::Tensor output);
-
-void sorf_features_backwards_cuda(torch::Tensor grad, torch::Tensor sub, torch::Tensor D, torch::Tensor b, float coeff_normalisation,
-		torch::Tensor batch_indexes, torch::Tensor output);
 
 void cos_features_gpu(torch::Tensor coeffs, torch::Tensor b, torch::Tensor batch_indexes, torch::Tensor output);
 void cos_derivative_features_gpu(torch::Tensor grads, torch::Tensor coeffs, torch::Tensor b, torch::Tensor batch_indexes, torch::Tensor output);
@@ -79,7 +74,7 @@ torch::Tensor CosDerivativeFeaturesCUDA(torch::Tensor grads, torch::Tensor coeff
 	return output;
 }
 
-torch::Tensor hadamard_transform_gpu3(torch::Tensor input, torch::Tensor dmatrix, float normalisation) {
+torch::Tensor hadamard_transform_gpu3(torch::Tensor input, torch::Tensor dmatrix, float normalisation, const int ntransforms) {
 
 	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
 	TORCH_CHECK(dmatrix.device().type() == torch::kCUDA, "dmatrix must be a CUDA tensor");
@@ -88,12 +83,12 @@ torch::Tensor hadamard_transform_gpu3(torch::Tensor input, torch::Tensor dmatrix
 
 	torch::Tensor output = torch::zeros( { input.size(0), dmatrix.size(1), input.size(1) }, options);
 
-	hadamard_gpu3(input, dmatrix, output, normalisation);
+	hadamard_gpu3(input, dmatrix, output, normalisation, ntransforms);
 
 	return output;
 }
 
-torch::Tensor hadamard_transform_backwards_gpu3(torch::Tensor input, torch::Tensor dmatrix, float normalisation) {
+torch::Tensor hadamard_transform_backwards_gpu3(torch::Tensor input, torch::Tensor dmatrix, float normalisation, const int ntransforms) {
 
 	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
 	TORCH_CHECK(dmatrix.device().type() == torch::kCUDA, "dmatrix must be a CUDA tensor");
@@ -102,7 +97,7 @@ torch::Tensor hadamard_transform_backwards_gpu3(torch::Tensor input, torch::Tens
 
 	torch::Tensor output = torch::zeros( { input.size(0), input.size(2) }, options);
 
-	hadamard_backwards_gpu3(input, dmatrix, output, normalisation);
+	hadamard_backwards_gpu3(input, dmatrix, output, normalisation, ntransforms);
 
 	return output;
 }
@@ -116,29 +111,6 @@ torch::Tensor hadamard_transform_gpu(torch::Tensor input) {
 	torch::Tensor output = torch::zeros( { input.size(0), input.size(1), input.size(2) }, options);
 
 	hadamard_gpu(input, output);
-
-	return output;
-}
-
-torch::Tensor SORFFeaturesCUDA(torch::Tensor sub, torch::Tensor D, torch::Tensor b, float coeff_normalisation, int nmol, torch::Tensor batch_indexes) {
-
-	auto options = torch::TensorOptions().dtype(torch::kFloat32).layout(torch::kStrided).device(torch::kCUDA);
-
-	torch::Tensor output = torch::zeros( { nmol, D.size(1) * D.size(2) }, options);
-
-	sorf_features_cuda(sub, D, b, coeff_normalisation, batch_indexes, output);
-
-	return output;
-}
-
-torch::Tensor SORFFeaturesBackwardsCUDA(torch::Tensor grad, torch::Tensor sub, torch::Tensor D, torch::Tensor b, float coeff_normalisation, int nmol,
-		torch::Tensor batch_indexes) {
-
-	auto options = torch::TensorOptions().dtype(torch::kFloat32).layout(torch::kStrided).device(torch::kCUDA);
-
-	torch::Tensor output = torch::zeros( { sub.size(0), sub.size(1) }, options);
-
-	sorf_features_backwards_cuda(grad, sub, D, b, coeff_normalisation, batch_indexes, output);
 
 	return output;
 }
@@ -183,8 +155,6 @@ void compute_hadamard_derivative_features(torch::Tensor sorf_matrix, double norm
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
 	m.def("sorf_matrix_gpu", &sorf_matrix_gpu, "Computes the SORF matrix components (before featurization).");
-	m.def("SORFFeaturesCUDA", &SORFFeaturesCUDA, "");
-	m.def("SORFFeaturesBackwardsCUDA", &SORFFeaturesBackwardsCUDA, "");
 
 	m.def("CosFeaturesCUDA", &CosFeaturesCUDA, "");
 	m.def("CosDerivativeFeaturesCUDA", &CosDerivativeFeaturesCUDA, "");

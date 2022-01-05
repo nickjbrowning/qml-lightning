@@ -7,7 +7,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, SORFTransformCuda, SORFFeatures, SORFTransformCuda2, SORFTransformCuda3, CosFeatures
+from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, SORFTransformCuda, SORFTransformCuda3, CosFeatures
 
 from qml_lightning.cuda.sorf_gpu import compute_hadamard_features, sorf_matrix_gpu, compute_partial_feature_derivatives, compute_molecular_featurization_derivative
 from qml_lightning.models.kernel import BaseKernel
@@ -46,7 +46,8 @@ class HadamardFeaturesModel(BaseKernel):
         for e in self.elements:
             self.Dmat_for_backwards[e] = self.Dmat[e].reshape(self.ntransforms, int(self.nfeatures / self.npcas), self.npcas)
         
-        self.alpha = None
+        self.is_trained = False
+        self.alpha = torch.zeros(self.nfeatures, device=self.device, dtype=torch.float)
     
     def calculate_features(self, representation, element, indexes, feature_matrix, grad=None, derivative_features=None):
         coeff_normalisation = np.sqrt(representation.shape[1]) / self.sigma
@@ -116,6 +117,60 @@ class HadamardFeaturesModel(BaseKernel):
                 
         return feature_derivative
     
+    def SGD(self, X, Z, E, cells=None, lr=0.01, niter=100000):
+
+        coeff_normalisation = np.sqrt(self.npcas) / self.sigma
+   
+        data = self.format_data(X, Z, E=E, cells=cells)
+        
+        coordinates = data['coordinates']
+        charges = data['charges']
+        atomIDs = data['atomIDs']
+        molIDs = data['molIDs']
+        natom_counts = data['natom_counts']
+        zcells = data['cells']
+        energies = data['energies']
+        
+        torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
+        
+        permutation = torch.randperm(coordinates.shape[0])
+        
+        for i in range(0, niter):
+            for j in range(0, coordinates.shape[0], self.nbatch_train):
+            
+                indices = permutation[j:j + self.nbatch_train]
+        
+                sub_rep = torch_rep[indices]
+
+                Ztrain = torch.zeros(sub_rep.shape[0], self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
+            
+                for e in self.elements:
+                    indexes = charges[indices] == e
+                    
+                    batch_indexes = torch.where(indexes)[0].type(torch.int)
+                    
+                    sub = sub_rep[indexes]
+                    
+                    if (sub.shape[0] == 0): continue
+             
+                    sub = project_representation(sub, self.reductors[e])
+                    
+                    Dmat = self.Dmat_for_backwards[e]
+                    bias = self.bk[e]
+        
+                    coeffs = SORFTransformCuda3.apply(sub, Dmat, coeff_normalisation, self.ntransforms)
+                 
+                    coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
+       
+                    Ztrain += CosFeatures.apply(coeffs, bias, sub_rep.shape[0], batch_indexes)
+            
+                batch_predictions = torch.matmul(Ztrain, self.alpha)
+                
+                self.alpha -= lr * (1.0 / sub_rep.shape[0]) * torch.matmul(batch_predictions - energies[indices].float(), Ztrain)
+            
+            print ("iteration: ", i, torch.mean(torch.abs(batch_predictions - energies[indices].float())))
+            print ("alpha:", self.alpha)
+    
     def predict(self, X, Z, max_natoms, cells=None, forces=True, print_info=True, use_backward=True, profiler=False):
 
         if (not use_backward):
@@ -127,10 +182,8 @@ class HadamardFeaturesModel(BaseKernel):
         with torch.autograd.profiler.profile(enabled=profiler, use_cuda=True, with_stack=True) as prof:
             
             start.record()
-            
-            coeff_normalisation = np.sqrt(self.npcas) / self.sigma
 
-            if (self.alpha is None):
+            if (self.is_trained is False):
                 print ("Error: must train the model first by calling train()!")
                 exit()
             
@@ -157,44 +210,17 @@ class HadamardFeaturesModel(BaseKernel):
                 natom_counts = data['natom_counts']
                 zcells = data['cells']
                 
-                if (forces):
-                    coordinates.requires_grad = True
-                 
-                torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
-                
-                Ztest = torch.zeros(zbatch, self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
-                
-                for e in self.elements:
-                    indexes = charges == e
-                    
-                    batch_indexes = torch.where(indexes)[0].type(torch.int)
-                    
-                    sub = torch_rep[indexes]
-                    
-                    if (sub.shape[0] == 0): continue
-                    
-                    sub = project_representation(sub, self.reductors[e])
-                    
-                    sub = sub.repeat(1, int(self.nfeatures / self.npcas)).reshape(sub.shape[0], int(self.nfeatures / self.npcas), self.npcas)
-                    
-                    coeffs = coeff_normalisation
-     
-                    for j in range(self.ntransforms):
-                        coeffs *= SORFTransformCuda.apply(self.Dmat_for_backwards[e][None, j] * sub)
-                                       
-                    coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
-     
-                    Ztest.index_add_(0, batch_indexes, self.feature_normalisation * torch.cos(coeffs + self.bk[e]))
-            
-                total_energies = torch.matmul(Ztest.double(), self.alpha)
-                
-                predict_energies[i:i + self.nbatch_test] = total_energies
+                result = self.predict_opt(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, max_natoms, forces=forces, print_info=False, profiler=False)
                 
                 if (forces):
-                    forces_cuda, = torch.autograd.grad(-total_energies.sum(), coordinates)
+                    predict_energies[i:i + self.nbatch_test] = result[0]
+                    
+                    forces_cuda = result[1]
     
                     for j in range(forces_cuda.shape[0]):
                         predict_forces[i + j,:natom_counts[j]] = forces_cuda[j,:natom_counts[j]]
+                else:
+                    predict_energies[i:i + self.nbatch_test] = result
       
             end.record()
             torch.cuda.synchronize()
@@ -211,9 +237,7 @@ class HadamardFeaturesModel(BaseKernel):
             return predict_energies
         
     def predict_opt(self, coordinates, charges, atomIDs, molIDs, natom_counts, zcells, max_natoms,
-                    forces=True, print_info=True, use_backward=True, profiler=False):
-        
-        assert (self.ntransforms == 1)
+                    forces=True, print_info=True, profiler=False):
         
         with torch.autograd.profiler.profile(enabled=profiler, use_cuda=True, with_stack=True) as prof:
             
@@ -224,12 +248,10 @@ class HadamardFeaturesModel(BaseKernel):
             
             coeff_normalisation = np.sqrt(self.npcas) / self.sigma
 
-            if (self.alpha is None):
+            if (self.is_trained is False):
                 print ("Error: must train the model first by calling train()!")
                 exit()
-            
-            predict_energies = torch.zeros(len(coordinates), device=self.device, dtype=torch.float64)
-            
+
             if (forces):
                 coordinates.requires_grad = True
              
@@ -251,7 +273,7 @@ class HadamardFeaturesModel(BaseKernel):
                 Dmat = self.Dmat_for_backwards[e]
                 bias = self.bk[e]
         
-                coeffs = SORFTransformCuda3.apply(sub, Dmat, coeff_normalisation)
+                coeffs = SORFTransformCuda3.apply(sub, Dmat, coeff_normalisation, self.ntransforms)
                  
                 coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
 
