@@ -276,7 +276,7 @@ class HadamardFeaturesModel(BaseKernel):
                 coeffs = SORFTransformCuda3.apply(sub, Dmat, coeff_normalisation, self.ntransforms)
                  
                 coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
-
+                
                 Ztest += CosFeatures.apply(coeffs, bias, coordinates.shape[0], batch_indexes)
    
             total_energies = torch.matmul(Ztest, self.alpha.float())
@@ -287,17 +287,25 @@ class HadamardFeaturesModel(BaseKernel):
             end.record()
             torch.cuda.synchronize()
         
-        if (profiler):
-            print(prof.key_averages(group_by_stack_n=8).table(sort_by='self_cuda_time_total', row_limit=15))
+        # if (profiler):
+            # <FunctionEventAvg key=cudaEventCreateWithFlags self_cpu_time=6.000us cpu_time=1.500us  self_cuda_time=0.000us cuda_time=0.000us input_shapes= cpu_memory_usage=0 cuda_memory_usage=0>
+            # print(prof.key_averages()[0])
+            # print(prof.key_averages(group_by_stack_n=8).table(sort_by='self_cuda_time_total', row_limit=15)['Name'])
             
         if (print_info):
             print("prediction for", coordinates.shape[0], "molecules time: ", start.elapsed_time(end), "ms")
         
         if (forces):
-            return total_energies, forces_torch
+            result = (total_energies, forces_torch)
+
         else:
-            return total_energies
-        
+            result = (total_energies,)
+    
+        if (profiler):
+            result = result + (prof.key_averages(),)
+            
+        return result
+
     def save_model(self, file_name="model.yaml"):
         pass
     

@@ -206,8 +206,20 @@ class BaseKernel(torch.nn.Module):
             
         self.alpha = x[:, 0]
     
-    def train(self, X, Z, E=None, F=None, cells=None, print_info=True):
-            
+    def train(self, X, Z, E=None, F=None, cells=None, print_info=True, cpu_solve=False, tiling=-1):
+        
+        '''
+        X: list of coordinates : numpy arrays of shape [natom_i, 3]
+        Z: list of charges: numpy arrays of shape [natom_i]
+        
+        cpu_solve: set to True to store Z^TZ on the CPU, and solve on the CPU
+        tiling: > 0 sets the Z^TZ matrix to be constructed in (self.nfeatures/tiling) slices per batch.
+         
+        print_info: Boolean defining whether or not to print timings + progress bar
+        
+        
+        '''
+        
         if (self.reductors is None):
             print("ERROR: Must call model.get_reductors() first to initialize the projection matrices.")
             exit()
@@ -218,11 +230,8 @@ class BaseKernel(torch.nn.Module):
         
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
-        
-        startg = torch.cuda.Event(enable_timing=True)
-        endg = torch.cuda.Event(enable_timing=True)
-        
-        ZTZ = torch.zeros(self.nfeatures, self.nfeatures, device=self.device, dtype=torch.float64)
+
+        ZTZ = torch.zeros(self.nfeatures, self.nfeatures, device=torch.device('cpu') if cpu_solve else self.device, dtype=torch.float64)
         ZtrainY = torch.zeros(self.nfeatures, 1, device=self.device, dtype=torch.float64)
 
         start.record()
@@ -258,8 +267,7 @@ class BaseKernel(torch.nn.Module):
                 targets = torch.cat((energies[:, None], forces.flatten()[:, None]), dim=0)
             
             max_natoms = natom_counts.max().item()
-            
-            startg.record()
+      
             if (F is None):
                 gto = self.rep.get_representation(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
             else:
@@ -300,19 +308,24 @@ class BaseKernel(torch.nn.Module):
                 Gtrain_derivative = Gtrain_derivative.reshape(zbatch * max_natoms * 3, self.nfeatures)
                 
                 Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
-            
-            endg.record()
-            torch.cuda.synchronize()
-            # print("Features and derivatives time: ", startg.elapsed_time(endg), "ms")
-            
+ 
             ZtrainY += torch.matmul(Ztrain.T, targets)
             
-            startg.record()
-            ZTZ += torch.matmul(Ztrain.T, Ztrain)
-            endg.record()
-            torch.cuda.synchronize()
-            # print("sub ZTZ time: ", startg.elapsed_time(endg), "ms")
-            
+            if (tiling != -1):
+                # tiling defines whether to compute the ZTZ matrix in slices - useful in situations with limited memory
+                # and you can't afford to store the ZTZ matrix twice (which torch.matmul will effectively do). This in combination
+                # with cpu_solve should allow much larger nfeatures than can be stored on the GPU alone.
+                for i in range(0, int(self.nfeatures / tiling)):
+                    
+                    sub = Ztrain[:, i * tiling:(i + 1) * tiling]
+             
+                    if (cpu_solve):
+                        ZTZ[i * tiling:(i + 1) * tiling] += torch.matmul(sub.T, Ztrain).cpu()
+                    else:
+                        ZTZ[i * tiling:(i + 1) * tiling] += torch.matmul(sub.T, Ztrain)
+            else:
+                ZTZ += torch.matmul(Ztrain.T, Ztrain)
+  
             del Ztrain
             del gto
             del sub
@@ -326,8 +339,6 @@ class BaseKernel(torch.nn.Module):
         
         end.record()
         torch.cuda.synchronize()
-            
-        # maxval = torch.max(torch.diagonal(ZTZ))
         
         for i in range(self.nfeatures):
             ZTZ[i, i] += self.llambda
@@ -337,9 +348,15 @@ class BaseKernel(torch.nn.Module):
             print("ZTZ time: ", start.elapsed_time(end), "ms")
         
         start.record()
-        self.alpha = torch.linalg.solve(ZTZ, ZtrainY)[:, 0]
+        
+        if (cpu_solve):
+            self.alpha = torch.linalg.solve(ZTZ, ZtrainY.cpu())[:, 0].cuda()
+        else:
+            self.alpha = torch.linalg.solve(ZTZ, ZtrainY)[:, 0]
+            
         end.record()
         torch.cuda.synchronize()
+        
         if (print_info):
             print("coefficients time: ", start.elapsed_time(end), "ms")
         

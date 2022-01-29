@@ -34,7 +34,11 @@ class FCHLFunction(torch.autograd.Function):
             
         nneighbours = pairlist_gpu.get_num_neighbours_gpu(X, atom_counts, rcut,
                                                          cell , inv_cell)
-      
+        
+        # print (nneighbours)
+        
+        # print (torch.mean(nneighbours.float()))
+        
         max_neighbours = nneighbours.max().item()
      
         neighbourlist = pairlist_gpu.get_neighbour_list_gpu(X, atom_counts, max_neighbours, rcut,
