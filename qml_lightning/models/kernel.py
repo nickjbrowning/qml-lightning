@@ -322,9 +322,6 @@ class BaseKernel(torch.nn.Module):
                     Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
                 
                 if (ntiles > 1):
-                    # tiling defines whether to compute the ZTZ matrix in slices - useful in situations with limited memory
-                    # and you can't afford to store the ZTZ matrix twice (which torch.matmul will effectively do). This in combination
-                    # with cpu_solve allows much larger nfeatures than can be stored on the GPU alone.
 
                     sub = Ztrain[:, tile * nsub_features:(tile + 1) * nsub_features]
                     ZTZ_tile += torch.matmul(sub.T, Ztrain)
@@ -335,6 +332,7 @@ class BaseKernel(torch.nn.Module):
                         ZTZ += torch.matmul(Ztrain.T, Ztrain).cpu()
                     else:
                         ZTZ += torch.matmul(Ztrain.T, Ztrain)
+                        
                     ZtrainY += torch.matmul(Ztrain.T, targets)
       
                 del Ztrain
@@ -421,7 +419,7 @@ class BaseKernel(torch.nn.Module):
             
             self.sigma = s
             
-            ZTZ, ZtrainY = self.build_Z_components(Xtrain, Qtrain, Etrain, Ftrain, celltrain, False, cpu_solve, ntiles, print_info=True)
+            ZTZ, ZtrainY = self.build_Z_components(Xtrain, Qtrain, Etrain, Ftrain, celltrain, True, cpu_solve, ntiles)
             
             print (ZTZ)
             print (ZtrainY)
