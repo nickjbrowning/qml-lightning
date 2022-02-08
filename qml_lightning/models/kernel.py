@@ -421,7 +421,7 @@ class BaseKernel(torch.nn.Module):
             
             self.sigma = s
             
-            ZTZ, ZtrainY = self.build_Z_components(Xtrain, Qtrain, Etrain, Ftrain, celltrain, False, cpu_solve, ntiles)
+            ZTZ, ZtrainY = self.build_Z_components(Xtrain, Qtrain, Etrain, Ftrain, celltrain, False, cpu_solve, ntiles, print_info=True)
             
             for j, l in enumerate(llambdas):
                 
