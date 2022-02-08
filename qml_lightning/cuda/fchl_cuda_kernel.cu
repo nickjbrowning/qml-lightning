@@ -288,6 +288,7 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 	float ielement = element_types[molID][iatom];
 
 	float expf_v = expf(-powf(M_PI, 2) * 0.5);
+	float sqrt2pi = sqrtf(2.0 * M_PI);
 
 	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
 
@@ -308,11 +309,13 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 		float rcutij = get_cutoff(rij, rcut, 0.0, 0);
 
 		float mu = log(rij / sqrt(1.0 + eta2 / powf(rij, 2.0)));
-		float sigma = sqrt(log(1.0 + eta2 / powf(rij, 2.0)));
+		float sigma = sqrtf(log(1.0 + eta2 / powf(rij, 2.0)));
+
+		float invsigma22 = 1.0 / (2.0 * powf(sigma, 2));
 
 		for (int z = 0; z < nRs2; z++) {
 
-			float radial = 1.0 / (sigma * sqrt(2.0 * M_PI) * sRs2[z]) * expf(-powf(log(sRs2[z]) - mu, 2) / (2.0 * powf(sigma, 2))) * scaling * rcutij;
+			float radial = 1.0 / (sigma * sqrt2pi * sRs2[z]) * expf(-powf(log(sRs2[z]) - mu, 2) * invsigma22) * scaling * rcutij;
 
 			atomicAdd(&output[molID][iatom][jelement * nRs2 + z], radial);
 
@@ -1202,25 +1205,28 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 				float radial = expf(-eta3 * powf(0.5 * (rij + rik) - sRs3[l], 2.0));
 				float d_radial = radial * eta3 * (0.5 * (rij + rik) - sRs3[l]);
 
-				for (int a = 0; a < 2; a++) {
+				float grad_in_iatom_list[2] = { grad_in[molID][iatom][s + l * 2], grad_in[molID][iatom][s + l * 2 + 1] };
 
-					int z = s + l * 2 + a;
+				for (int x = 0; x < 3; x++) {
 
-					float grad_in_iatom = grad_in[molID][iatom][z];
+					for (int a = 0; a < 2; a++) {
 
-					for (int x = 0; x < 3; x++) {
+						float dangular_a = dangular[a];
+						float angular_a = angular[a];
 
-						float deriv_iatomx = dangular[a] * d_angular_d_i[x] * radial * atm_cut + angular[a] * d_radial * d_radial_d_i[x] * atm_cut
-								+ angular[a] * radial * (atm_i * d_atm_ii[x] + atm_j * d_atm_ij[x] + atm_k * d_atm_ik[x] + d_atm_extra_i[x]) * three_body_weight
-										* rcuts + angular[a] * radial * (d_ijdecay[x] * rcutik + rcutij * d_ikdecay[x]) * atm;
+						float grad_in_iatom = grad_in_iatom_list[a];
 
-						float deriv_jatomx = dangular[a] * d_angular_d_j[x] * radial * atm_cut + angular[a] * d_radial * d_radial_d_j[x] * atm_cut
-								+ angular[a] * radial * (atm_i * d_atm_ji[x] + atm_j * d_atm_jj[x] + atm_k * d_atm_jk[x] + d_atm_extra_j[x]) * three_body_weight
-										* rcuts - angular[a] * radial * d_ijdecay[x] * rcutik * atm;
+						float deriv_iatomx = dangular_a * d_angular_d_i[x] * radial * atm_cut + angular_a * d_radial * d_radial_d_i[x] * atm_cut
+								+ angular_a * radial * (atm_i * d_atm_ii[x] + atm_j * d_atm_ij[x] + atm_k * d_atm_ik[x] + d_atm_extra_i[x]) * three_body_weight
+										* rcuts + angular_a * radial * (d_ijdecay[x] * rcutik + rcutij * d_ikdecay[x]) * atm;
 
-						float deriv_katomx = dangular[a] * d_angular_d_k[x] * radial * atm_cut + angular[a] * d_radial * d_radial_d_k[x] * atm_cut
-								+ angular[a] * radial * (atm_i * d_atm_ki[x] + atm_j * d_atm_kj[x] + atm_k * d_atm_kk[x] + d_atm_extra_k[x]) * three_body_weight
-										* rcuts - angular[a] * radial * rcutij * d_ikdecay[x] * atm;
+						float deriv_jatomx = dangular_a * d_angular_d_j[x] * radial * atm_cut + angular_a * d_radial * d_radial_d_j[x] * atm_cut
+								+ angular_a * radial * (atm_i * d_atm_ji[x] + atm_j * d_atm_jj[x] + atm_k * d_atm_jk[x] + d_atm_extra_j[x]) * three_body_weight
+										* rcuts - angular_a * radial * d_ijdecay[x] * rcutik * atm;
+
+						float deriv_katomx = dangular_a * d_angular_d_k[x] * radial * atm_cut + angular_a * d_radial * d_radial_d_k[x] * atm_cut
+								+ angular_a * radial * (atm_i * d_atm_ki[x] + atm_j * d_atm_kj[x] + atm_k * d_atm_kk[x] + d_atm_extra_k[x]) * three_body_weight
+										* rcuts - angular_a * radial * rcutij * d_ikdecay[x] * atm;
 
 						igrad[x] += grad_in_iatom * deriv_iatomx;
 						deriv_jatom[x] += grad_in_iatom * deriv_jatomx;
@@ -1266,7 +1272,7 @@ void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 	int nRs3 = Rs3.size(0);
 	int nspecies = species.size(0);
 
-	//int repsize = nspecies * nRs2 + (nspecies * (nspecies + 1)) * nRs3;
+//int repsize = nspecies * nRs2 + (nspecies * (nspecies + 1)) * nRs3;
 
 	const int currBatch = blockAtomIDs.size(0);
 	const int max_neighbours = nneighbours.max().item<int>();

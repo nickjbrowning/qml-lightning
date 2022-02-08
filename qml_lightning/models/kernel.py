@@ -205,15 +205,15 @@ class BaseKernel(torch.nn.Module):
             rsold = rsnew
             
         self.alpha = x[:, 0]
-    
-    def train(self, X, Z, E=None, F=None, cells=None, print_info=True, cpu_solve=False, tiling=-1):
+
+    def train(self, X, Z, E=None, F=None, cells=None, print_info=True, cpu_solve=False, ntiles=1):
         
         '''
         X: list of coordinates : numpy arrays of shape [natom_i, 3]
         Z: list of charges: numpy arrays of shape [natom_i]
         
         cpu_solve: set to True to store Z^TZ on the CPU, and solve on the CPU
-        tiling: > 0 sets the Z^TZ matrix to be constructed in (self.nfeatures/tiling) slices per batch.
+        ntiles: > 1 sets the Z^TZ matrix to be constructed in (self.nfeatures/ntiles) features per batch.
          
         print_info: Boolean defining whether or not to print timings + progress bar
         
@@ -233,110 +233,122 @@ class BaseKernel(torch.nn.Module):
 
         ZTZ = torch.zeros(self.nfeatures, self.nfeatures, device=torch.device('cpu') if cpu_solve else self.device, dtype=torch.float64)
         ZtrainY = torch.zeros(self.nfeatures, 1, device=self.device, dtype=torch.float64)
-
+        
         start.record()
-        for i in tqdm(range(0, len(X), self.nbatch_train)) if print_info else (range(0, len(X), self.nbatch_train)):
+        
+        nsub_features = int(self.nfeatures / ntiles)
+        
+        for tile in range(0, ntiles):
             
-            coordinates = X[i:i + self.nbatch_train]
-            charges = Z[i:i + self.nbatch_train]
+            print ("tile:", tile + 1 , "of", ntiles, "tiles")
             
-            energies = E[i:i + self.nbatch_train] if E is not None else None
-            forces = F[i:i + self.nbatch_train] if F is not None else None
-            zcells = cells[i:i + self.nbatch_train]  if cells is not None else None
+            if (ntiles > 1):
+                ZTZ_tile = torch.zeros(nsub_features, self.nfeatures, device=self.device, dtype=torch.float64)
+             
+            for i in tqdm(range(0, len(X), self.nbatch_train)) if print_info else (range(0, len(X), self.nbatch_train)):
                 
-            zbatch = len(coordinates)
-            
-            data = self.format_data(coordinates, charges, E=energies, F=forces, cells=zcells)
-            
-            coordinates = data['coordinates']
-            charges = data['charges']
-            atomIDs = data['atomIDs']
-            molIDs = data['molIDs']
-            natom_counts = data['natom_counts']
-            zcells = data['cells']
-            
-            energies = data['energies']
-            forces = data['forces']
-            
-            if (E is not None and F is None):
-                targets = energies[:, None] 
-            elif (E is None and F is not None):
-                # zero out energy targets so it has the correct dimensions for matmul
-                targets = torch.cat((torch.zeros((zbatch, 1), device=self.device), forces.flatten()[:, None]), dim=0)
-            else:
-                targets = torch.cat((energies[:, None], forces.flatten()[:, None]), dim=0)
-            
-            max_natoms = natom_counts.max().item()
-      
-            if (F is None):
-                gto = self.rep.get_representation(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
-            else:
-                gto, gto_derivative = self.rep.get_representation_and_derivative(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
-            
-            Ztrain = torch.zeros(zbatch, self.nfeatures, device=self.device, dtype=torch.float64)
-            
-            Gtrain_derivative = None
-            
-            if (F is not None):
-                Gtrain_derivative = torch.zeros(zbatch, max_natoms, 3, self.nfeatures, device=self.device, dtype=torch.float64)
+                coordinates = X[i:i + self.nbatch_train]
+                charges = Z[i:i + self.nbatch_train]
                 
-            for e in self.elements:
-            
-                indexes = charges.int() == e
+                energies = E[i:i + self.nbatch_train] if E is not None else None
+                forces = F[i:i + self.nbatch_train] if F is not None else None
+                zcells = cells[i:i + self.nbatch_train]  if cells is not None else None
+                    
+                zbatch = len(coordinates)
                 
-                batch_indexes = torch.where(indexes)[0].type(torch.int)
+                data = self.format_data(coordinates, charges, E=energies, F=forces, cells=zcells)
                 
-                sub = gto[indexes]
+                coordinates = data['coordinates']
+                charges = data['charges']
+                atomIDs = data['atomIDs']
+                molIDs = data['molIDs']
+                natom_counts = data['natom_counts']
+                zcells = data['cells']
                 
-                if (sub.shape[0] == 0):
-                    continue
+                energies = data['energies']
+                forces = data['forces']
                 
-                sub = project_representation(sub, self.reductors[e])
-     
-                sub_grad = None
+                if (E is not None and F is None):
+                    targets = energies[:, None] 
+                elif (E is None and F is not None):
+                    # zero out energy targets so it has the correct dimensions for matmul
+                    targets = torch.cat((torch.zeros((zbatch, 1), device=self.device), forces.flatten()[:, None]), dim=0)
+                else:
+                    targets = torch.cat((energies[:, None], forces.flatten()[:, None]), dim=0)
+                
+                max_natoms = natom_counts.max().item()
+          
+                if (F is None):
+                    gto = self.rep.get_representation(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
+                else:
+                    gto, gto_derivative = self.rep.get_representation_and_derivative(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
+                
+                Ztrain = torch.zeros(zbatch, self.nfeatures, device=self.device, dtype=torch.float64)
+                
+                Gtrain_derivative = None
                 
                 if (F is not None):
-                    sub_grad = gto_derivative[indexes]
-                    sub_grad = project_derivative(sub_grad, self.reductors[e])
-     
-                self.calculate_features(sub, e, batch_indexes, Ztrain, sub_grad, Gtrain_derivative)
-            
-            if (E is None):
-                Ztrain.fill_(0)  # hack to set all energy features to 0, such that they do not contribute to Z.T Z
-            
-            if (F is not None):
-                Gtrain_derivative = Gtrain_derivative.reshape(zbatch * max_natoms * 3, self.nfeatures)
-                
-                Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
- 
-            ZtrainY += torch.matmul(Ztrain.T, targets)
-            
-            if (tiling != -1):
-                # tiling defines whether to compute the ZTZ matrix in slices - useful in situations with limited memory
-                # and you can't afford to store the ZTZ matrix twice (which torch.matmul will effectively do). This in combination
-                # with cpu_solve should allow much larger nfeatures than can be stored on the GPU alone.
-                for i in range(0, int(self.nfeatures / tiling)):
+                    Gtrain_derivative = torch.zeros(zbatch, max_natoms, 3, self.nfeatures, device=self.device, dtype=torch.float64)
                     
-                    sub = Ztrain[:, i * tiling:(i + 1) * tiling]
-             
-                    if (cpu_solve):
-                        ZTZ[i * tiling:(i + 1) * tiling] += torch.matmul(sub.T, Ztrain).cpu()
-                    else:
-                        ZTZ[i * tiling:(i + 1) * tiling] += torch.matmul(sub.T, Ztrain)
-            else:
-                ZTZ += torch.matmul(Ztrain.T, Ztrain)
-  
-            del Ztrain
-            del gto
-            del sub
-            
-            if (F is not None):
-                del Gtrain_derivative
-                del gto_derivative
-                del sub_grad
+                for e in self.elements:
                 
-            torch.cuda.empty_cache()
-        
+                    indexes = charges.int() == e
+                    
+                    batch_indexes = torch.where(indexes)[0].type(torch.int)
+                    
+                    sub = gto[indexes]
+                    
+                    if (sub.shape[0] == 0):
+                        continue
+                    
+                    sub = project_representation(sub, self.reductors[e])
+         
+                    sub_grad = None
+                    
+                    if (F is not None):
+                        sub_grad = gto_derivative[indexes]
+                        sub_grad = project_derivative(sub_grad, self.reductors[e])
+         
+                    self.calculate_features(sub, e, batch_indexes, Ztrain, sub_grad, Gtrain_derivative)
+                
+                if (E is None):
+                    Ztrain.fill_(0)  # hack to set all energy features to 0, such that they do not contribute to Z.T Z
+                
+                if (F is not None):
+                    Gtrain_derivative = Gtrain_derivative.reshape(zbatch * max_natoms * 3, self.nfeatures)
+                    
+                    Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
+                
+                if (ntiles > 1):
+                    # tiling defines whether to compute the ZTZ matrix in slices - useful in situations with limited memory
+                    # and you can't afford to store the ZTZ matrix twice (which torch.matmul will effectively do). This in combination
+                    # with cpu_solve allows much larger nfeatures than can be stored on the GPU alone.
+
+                    sub = Ztrain[:, tile * nsub_features:(tile + 1) * nsub_features]
+                    ZTZ_tile += torch.matmul(sub.T, Ztrain)
+                    ZtrainY[ tile * nsub_features:(tile + 1) * nsub_features,:] += torch.matmul(sub.T, targets)
+                    
+                else:
+                    ZTZ += torch.matmul(Ztrain.T, Ztrain)
+                    ZtrainY += torch.matmul(Ztrain.T, targets)
+      
+                del Ztrain
+                del gto
+                del sub
+                
+                if (F is not None):
+                    del Gtrain_derivative
+                    del gto_derivative
+                    del sub_grad
+                    
+                torch.cuda.empty_cache()
+            
+            if (ntiles > 1):
+                if (cpu_solve):
+                    ZTZ[tile * nsub_features:(tile + 1) * nsub_features,:] += ZTZ_tile.cpu()
+                else:
+                    ZTZ[tile * nsub_features:(tile + 1) * nsub_features,:] += ZTZ_tile
+                
         end.record()
         torch.cuda.synchronize()
         
@@ -366,6 +378,9 @@ class BaseKernel(torch.nn.Module):
         self.is_trained = True
         
         torch.cuda.empty_cache()
+        
+    def hyperparam_opt_on_valset(self):
+        pass
     
     def hyperparam_opt_nested_cv(self, X, Z, E, F=None, sigmas=np.linspace(1.5, 12.5, 10), lambdas=np.logspace(-11, -5, 9), kfolds=5, print_info=True, use_backward=True):
         from sklearn.model_selection import KFold

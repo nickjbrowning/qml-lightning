@@ -6,31 +6,31 @@ from qml_lightning.utils.ani1x_dataloader import iter_data_buckets
 import argparse
 
 from qml_lightning.models.hadamard_features import HadamardFeaturesModel
-from qml_lightning.representations.EGTO import EGTOCuda
+from qml_lightning.representations.FCHL import FCHLCuda
 
-path_to_h5file = '../../../data/ani-1x/ani-1x.h5'
+path_to_h5file = '../../../data/ani-1x/ani1x-release.h5'
 
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("-ntrain", type=int, default=1000)
+    parser.add_argument("-ntrain", type=int, default=5000)
     parser.add_argument("-ntest", type=int, default=1000)
     parser.add_argument("-nreductor_samples", type=int, default=1000)
     
-    parser.add_argument("-nbatch", type=int, default=64)
+    parser.add_argument("-nbatch", type=int, default=32)
     
     parser.add_argument("-forces", type=int, default=1)
     '''model parameters'''
-    parser.add_argument("-sigma", type=float, default=3.0)
-    parser.add_argument("-llambda", type=float, default=1e-12)
-    parser.add_argument("-npcas", type=int, default=128)
+    parser.add_argument("-sigma", type=float, default=4.0)
+    parser.add_argument("-llambda", type=float, default=1e-9)
+    parser.add_argument("-npcas", type=int, default=256)
     parser.add_argument("-ntransforms", type=int, default=1)
-    parser.add_argument("-nfeatures", type=int, default=8192)
+    parser.add_argument("-nfeatures", type=int, default=16384)
     
     '''representation parameters'''
     parser.add_argument("-eta", type=float, default=2.0)
-    parser.add_argument("-rcut", type=float, default=6.0)
+    parser.add_argument("-rcut", type=float, default=8.0)
     parser.add_argument("-lmax", type=int, default=2)
     parser.add_argument("-ngaussians", type=int, default=20)
     
@@ -105,15 +105,15 @@ if __name__ == "__main__":
     test_energies = [Es[i] for i in test_indexes]
     test_forces = [Fs[i] for i in test_indexes] 
         
-    representation = EGTOCuda(species=elements, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax)
+    representation = FCHLCuda(species=elements, high_cutoff=rcut)
     
     model = HadamardFeaturesModel(representation, elements=elements, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
-                                nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)
+                                nfeatures=nfeatures, npcas=npcas, nbatch_train=nbatch, nbatch_test=nbatch)
     
     model.set_convert_hartree2kcal(True)
     model.set_subtract_self_energies(True)
-    # model.calculate_self_energy(train_charges, train_energies)
-    model.self_energy = torch.Tensor([0., -0.600952980000, 0., 0., 0., 0., -38.08316124000, -54.70775770000, -75.19446356000, 0]).double() * 627.503
+    model.calculate_self_energy(train_charges, train_energies)
+    # model.self_energy = torch.Tensor([0., -0.600952980000, 0., 0., 0., 0., -38.08316124000, -54.70775770000, -75.19446356000, 0]).double() * 627.503
     
     model.get_reductors([Xs[i] for i in reductor_samples], [Zs[i]for i in reductor_samples], npcas=npcas)
     
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     
     max_natoms = data['natom_counts'].max().item()
 
-    energy_predictions, force_predictions = model.predict_cuda(test_coordinates, test_charges, max_natoms, forces=True)
+    energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True, use_backward=True)
     
     print("Energy MAE CUDA:", torch.mean(torch.abs(energy_predictions - test_energies)))
     print("Force MAE CUDA:", torch.mean(torch.abs(force_predictions.flatten() - test_forces.flatten())))
