@@ -423,6 +423,8 @@ class BaseKernel(torch.nn.Module):
             
             ZTZ, ZtrainY = self.build_Z_components(Xtrain, Qtrain, Etrain, Ftrain, celltrain, False, cpu_solve, ntiles, print_info=True)
             
+            print (ZTZ)
+            print (ZtrainY)
             for j, l in enumerate(llambdas):
                 
                 for k in range(self.nfeatures):
