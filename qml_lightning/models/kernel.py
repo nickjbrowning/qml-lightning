@@ -440,8 +440,9 @@ class BaseKernel(torch.nn.Module):
                 llambda_vals[i, j] = l
                     
                 if (Fval is None):
-                    energy_prediction = self.predict_opt(val_coordinates, val_charges, val_atomIDs, val_molIDs, val_natom_counts,
-                                                         val_zcells, val_natom_counts.max().item(), forces=False, print_info=False)
+                    # predict(self, X, Q, max_natoms, cells=None, forces=False, print_info=True, use_backward=True):
+                    energy_prediction = self.predict(Xval, Qval, val_natom_counts.max().item(),
+                                                     None, forces=False, print_info=False)
                     
                     energy_mae = torch.mean(torch.abs(energy_prediction - val_energies))
                     
@@ -450,8 +451,8 @@ class BaseKernel(torch.nn.Module):
                     print (s, l, energy_mae)
                 
                 else:
-                    energy_prediction, force_prediction = self.predict_opt(val_coordinates, val_charges, val_atomIDs, val_molIDs, val_natom_counts,
-                                                         val_zcells, val_natom_counts.max().item(), forces=True, print_info=False)
+                    energy_prediction, force_prediction = self.predict(Xval, Qval, val_natom_counts.max().item(),
+                                                                       None, forces=True, print_info=False)
                     
                     energy_mae = torch.mean(torch.abs(energy_prediction - val_energies))
                     force_mae = torch.mean(torch.abs(force_prediction.flatten() - val_forces.flatten()))
