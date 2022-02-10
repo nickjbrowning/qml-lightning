@@ -31,12 +31,8 @@ class HadamardFeaturesModel(BaseKernel):
         self.nbatch_test = nbatch_test
         
         self.species = torch.from_numpy(elements).float().cuda()
-        
-        # self.feature_normalisation = torch.tensor(np.sqrt(2.0 / nfeatures), device=self.device)
-        self.feature_normalisation = np.sqrt(2.0 / nfeatures)
+
         self.npcas = npcas
-        
-        self.nstacks = int(float(nfeatures) / npcas)
 
         self.Dmat = get_SORF_diagonals(elements, ntransforms, nfeatures, npcas)
         self.bk = get_bias(elements, nfeatures)
@@ -189,7 +185,7 @@ class HadamardFeaturesModel(BaseKernel):
             
             predict_energies = torch.zeros(len(X), device=self.device, dtype=torch.float64)
             predict_forces = torch.zeros(len(X), max_natoms, 3, device=self.device, dtype=torch.float64)
-    
+            
             for i in tqdm(range(0, len(X), self.nbatch_test)) if print_info else range(0, len(X), self.nbatch_test):
                 
                 coordinates = X[i:i + self.nbatch_test]
@@ -226,7 +222,8 @@ class HadamardFeaturesModel(BaseKernel):
             torch.cuda.synchronize()
         
         if (profiler):
-            print(prof.key_averages().table(sort_by="self_cuda_time_total"))
+            print(prof.key_averages(group_by_stack_n=30).table(sort_by='self_cuda_time_total', row_limit=30))
+            # print(prof.key_averages().table(sort_by="self_cuda_time_total"))
             
         if (print_info):
             print("prediction for", len(X), "molecules time: ", start.elapsed_time(end), "ms")
@@ -260,7 +257,8 @@ class HadamardFeaturesModel(BaseKernel):
             Ztest = torch.zeros(coordinates.shape[0], self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
             
             for e in self.elements:
-                indexes = charges == e
+           
+                indexes = charges.int() == e
                 
                 batch_indexes = torch.where(indexes)[0].type(torch.int)
                 
@@ -306,9 +304,79 @@ class HadamardFeaturesModel(BaseKernel):
             
         return result
 
-    def save_model(self, file_name="model.yaml"):
-        pass
+    def save_model(self, file_name="model"):
+  
+        data = {'elements': self.elements,
+                'ntransforms': self.ntransforms,
+                'nfeatures': self.nfeatures,
+                'nbatch_train': self.nbatch_train,
+                'nbatch_test': self.nbatch_test,
+                'npcas': self.npcas,
+                'is_trained': self.is_trained,
+                '_subtract_self_energies':self._subtract_self_energies,
+                'sigma': self.sigma,
+                'llambda': self.llambda,
+                'alpha': self.alpha.cpu().numpy()
+                }
+
+        if (self._subtract_self_energies):
+            data['self_energies'] = self.self_energy.cpu().numpy()
+            
+        for e in self.elements:
+            data[f'dmat_{e}'] = self.Dmat[e].cpu().numpy()
+            data[f'bk_{e}'] = self.bk[e].cpu().numpy()
+            data[f'reductors_{e}'] = self.reductors[e].cpu().numpy()
+            
+        np.save(file_name, data)
     
-    def load_model(self, file_name="model.yaml"):
-        pass
+    def load_model(self, file_name="model"):
+        
+        data = np.load(file_name  if ".npy" in file_name else file_name + ".npy", allow_pickle=True)[()]
+    
+        self.elements = data['elements']
+        self.species = torch.from_numpy(self.elements).float().cuda()
+        self.sigma = data['sigma']
+        self.llambda = data['llambda']
+        
+        self.ntransforms = data['ntransforms']
+        self.nfeatures = data['nfeatures']
+        self.nbatch_train = data['nbatch_train']
+        self.nbatch_test = data['nbatch_test']
+        self.npcas = data['npcas']
+        self.is_trained = data['is_trained']
+        self.alpha = torch.from_numpy(data['alpha']).double().cuda()
+        
+        self._subtract_self_energies = data['_subtract_self_energies']
+
+        if (self._subtract_self_energies):
+            self.self_energy = torch.from_numpy(data['self_energies']).float().cuda()
+            
+        self.Dmat = {}
+        self.bk = {}
+        self.reductors = {}
+        
+        for e in self.elements:
+            self.Dmat[e] = torch.from_numpy(data[f'dmat_{e}']).cuda()
+            self.bk[e] = torch.from_numpy(data[f'bk_{e}']).cuda()
+            self.reductors[e] = torch.from_numpy(data[f'reductors_{e}']).cuda()
+        
+        self.Dmat_for_backwards = {}
+        
+        for e in self.elements:
+            self.Dmat_for_backwards[e] = self.Dmat[e].reshape(self.ntransforms, int(self.nfeatures / self.npcas), self.npcas)
+        
+#         print (self.alpha)
+#         print (self.elements)
+#         print (self.nfeatures)
+#         print (self.nbatch_train)
+#         print (self.nbatch_test)
+#         print (self.npcas)
+#         print (self.is_trained)
+#         print (self._subtract_self_energies)
+#         print (self.self_energy)
+#         
+#         print (self.Dmat)
+#         print (self.bk)
+#         print (self.reductors)
+#         print (self.Dmat_for_backwards)
     

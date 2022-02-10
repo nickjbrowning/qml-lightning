@@ -45,7 +45,7 @@ def get_reductors(gto, charges, npcas, species):
 
 
 def project_representation(X, reductor):
-    
+   
     '''
     
     projects the representation from shape: 
