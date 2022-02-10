@@ -233,6 +233,10 @@ class BaseKernel(torch.nn.Module):
         end = torch.cuda.Event(enable_timing=True)
 
         ZTZ = torch.zeros(self.nfeatures, self.nfeatures, device=torch.device('cpu') if cpu_solve else self.device, dtype=torch.float64)
+        
+        if (cpu_solve):
+            ZTZ.pin_memory()
+            
         ZtrainY = torch.zeros(self.nfeatures, 1, device=self.device, dtype=torch.float64)
         
         start.record()
