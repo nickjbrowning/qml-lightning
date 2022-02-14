@@ -12,43 +12,7 @@ import numpy as np
 from qml_lightning.cuda import sorf_gpu
 
 
-class SORFTransformCuda2(torch.autograd.Function):
-    ''' 
-        Wrapper for forward/backward hadamard transforms for pytorch autograd support.
-        
-    '''
-
-    @staticmethod
-    def forward(ctx, u, d, coeff_normalisation):
-
-        ctx.save_for_backward(d)
-        ctx.coeff_normalisation = coeff_normalisation
-        
-        return sorf_gpu.hadamard_transform_gpu2(u, d, coeff_normalisation)
-
-    @staticmethod
-    def backward(ctx, grad):
-
-        d = ctx.saved_tensors[0]
-        
-        # print ("--grad--")
-        
-        # print (grad.shape)
-        # print (grad)
-        
-        # d_new = torch.ones_like(d)
-        
-        # grads = d * sorf_gpu.hadamard_transform_gpu2(grad, d_new, ctx.coeff_normalisation)
-        
-        grads = sorf_gpu.hadamard_transform_backwards_gpu2(grad, d, ctx.coeff_normalisation) 
-        # print ("transform: ")
-        # print (grads.shape)
-        # print (grads)
-        
-        return grads, None, None
-    
-
-class SORFTransformCuda3(torch.autograd.Function):
+class SORFTransformCuda(torch.autograd.Function):
     ''' 
         Wrapper for forward/backward hadamard transforms for pytorch autograd support.
         
@@ -61,44 +25,16 @@ class SORFTransformCuda3(torch.autograd.Function):
         ctx.coeff_normalisation = coeff_normalisation
         ctx.ntransforms = ntransforms
         
-        return sorf_gpu.hadamard_transform_gpu3(u, d, coeff_normalisation, ntransforms)
+        return sorf_gpu.hadamard_transform_gpu(u, d, coeff_normalisation, ntransforms)
 
     @staticmethod
     def backward(ctx, grad):
 
         d = ctx.saved_tensors[0]
 
-        grads = sorf_gpu.hadamard_transform_backwards_gpu3(grad, d, ctx.coeff_normalisation, ctx.ntransforms) 
+        grads = sorf_gpu.hadamard_transform_backwards_gpu(grad, d, ctx.coeff_normalisation, ctx.ntransforms) 
 
         return grads, None, None, None
-    
-
-class SORFTransformCuda(torch.autograd.Function):
-    ''' 
-        Wrapper for forward/backward hadamard transforms for pytorch autograd support.
-        
-    '''
-    
-    @staticmethod
-    def forward(ctx, u):
-
-        return sorf_gpu.hadamard_transform_gpu(u)
-
-    @staticmethod
-    def backward(ctx, grad):
-
-        # print ("--grad--")
-        
-        # print (grad.shape)
-        # print (grad)
-        
-        grads = sorf_gpu.hadamard_transform_gpu(grad)
-        
-        # print ("transform: ")
-        # print (grads.shape)
-        # print (grads)
-        
-        return grads
 
       
 class CosFeatures(torch.autograd.Function):
@@ -143,12 +79,12 @@ class CosFeatures(torch.autograd.Function):
         return grads, None, None, None
 
 
-def get_SORF_diagonals(elements, ntransforms, nfeatures, npcas):
+def get_SORF_diagonals(elements, ntransforms, nstacks, npcas):
     
     Dmat = {}
     
     for e  in elements:
-        D = np.random.uniform(-1, 1, (ntransforms, np.int(np.float(nfeatures) / npcas), npcas))
+        D = np.random.uniform(-1, 1, (ntransforms, nstacks, npcas))
         D[D > 0.0] = 1.0
         D[D < 0.0] = -1.0
         
@@ -168,13 +104,13 @@ def get_bias(elements, nfeatures):
     return b
 
 
-def get_SORF_coefficients(input_rep, nfeatures, diagonals, normalization, print_timings=False):
+def get_SORF_coefficients(input_rep, diagonals, normalization, print_timings=False):
     
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     
     start.record()
-    coeffs = normalization * sorf_gpu.sorf_matrix_gpu(input_rep, diagonals, nfeatures)
+    coeffs = normalization * sorf_gpu.sorf_matrix_gpu(input_rep, diagonals)
     
     end.record()
     torch.cuda.synchronize()

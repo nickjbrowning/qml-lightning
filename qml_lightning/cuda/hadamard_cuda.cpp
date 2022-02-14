@@ -13,44 +13,11 @@ void compute_molecular_featurization_derivative(torch::Tensor partial_feature_de
 
 void compute_partial_feature_derivatives(torch::Tensor sorf_matrix, torch::Tensor bias, torch::Tensor sin_coeffs);
 
-void hadamard_gpu2(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation);
-void hadamard_backwards_gpu2(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation);
-
-void hadamard_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
-void hadamard_backwards_gpu3(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
-
-void hadamard_gpu(torch::Tensor input, torch::Tensor output);
+void hadamard_gpu(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
+void hadamard_backwards_gpu(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
 
 void cos_features_gpu(torch::Tensor coeffs, torch::Tensor b, torch::Tensor batch_indexes, torch::Tensor output);
 void cos_derivative_features_gpu(torch::Tensor grads, torch::Tensor coeffs, torch::Tensor b, torch::Tensor batch_indexes, torch::Tensor output);
-
-torch::Tensor hadamard_transform_gpu2(torch::Tensor input, torch::Tensor dmatrix, float normalisation) {
-
-	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
-	TORCH_CHECK(dmatrix.device().type() == torch::kCUDA, "dmatrix must be a CUDA tensor");
-
-	auto options = torch::TensorOptions().dtype(torch::kFloat32).layout(torch::kStrided).device(torch::kCUDA);
-
-	torch::Tensor output = torch::zeros( { input.size(0), input.size(1), input.size(2) }, options);
-
-	hadamard_gpu2(input, dmatrix, output, normalisation);
-
-	return output;
-}
-
-torch::Tensor hadamard_transform_backwards_gpu2(torch::Tensor input, torch::Tensor dmatrix, float normalisation) {
-
-	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
-	TORCH_CHECK(dmatrix.device().type() == torch::kCUDA, "dmatrix must be a CUDA tensor");
-
-	auto options = torch::TensorOptions().dtype(torch::kFloat32).layout(torch::kStrided).device(torch::kCUDA);
-
-	torch::Tensor output = torch::zeros( { input.size(0), input.size(1), input.size(2) }, options);
-
-	hadamard_backwards_gpu2(input, dmatrix, output, normalisation);
-
-	return output;
-}
 
 torch::Tensor CosFeaturesCUDA(torch::Tensor coeffs, torch::Tensor b, int nmol, torch::Tensor batch_indexes) {
 
@@ -74,7 +41,7 @@ torch::Tensor CosDerivativeFeaturesCUDA(torch::Tensor grads, torch::Tensor coeff
 	return output;
 }
 
-torch::Tensor hadamard_transform_gpu3(torch::Tensor input, torch::Tensor dmatrix, float normalisation, const int ntransforms) {
+torch::Tensor hadamard_transform_gpu(torch::Tensor input, torch::Tensor dmatrix, float normalisation, const int ntransforms) {
 
 	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
 	TORCH_CHECK(dmatrix.device().type() == torch::kCUDA, "dmatrix must be a CUDA tensor");
@@ -83,12 +50,12 @@ torch::Tensor hadamard_transform_gpu3(torch::Tensor input, torch::Tensor dmatrix
 
 	torch::Tensor output = torch::zeros( { input.size(0), dmatrix.size(1), input.size(1) }, options);
 
-	hadamard_gpu3(input, dmatrix, output, normalisation, ntransforms);
+	hadamard_gpu(input, dmatrix, output, normalisation, ntransforms);
 
 	return output;
 }
 
-torch::Tensor hadamard_transform_backwards_gpu3(torch::Tensor input, torch::Tensor dmatrix, float normalisation, const int ntransforms) {
+torch::Tensor hadamard_transform_backwards_gpu(torch::Tensor input, torch::Tensor dmatrix, float normalisation, const int ntransforms) {
 
 	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
 	TORCH_CHECK(dmatrix.device().type() == torch::kCUDA, "dmatrix must be a CUDA tensor");
@@ -97,29 +64,17 @@ torch::Tensor hadamard_transform_backwards_gpu3(torch::Tensor input, torch::Tens
 
 	torch::Tensor output = torch::zeros( { input.size(0), input.size(2) }, options);
 
-	hadamard_backwards_gpu3(input, dmatrix, output, normalisation, ntransforms);
+	hadamard_backwards_gpu(input, dmatrix, output, normalisation, ntransforms);
 
 	return output;
 }
 
-torch::Tensor hadamard_transform_gpu(torch::Tensor input) {
-
-	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
-
-	auto options = torch::TensorOptions().dtype(torch::kFloat32).layout(torch::kStrided).device(torch::kCUDA);
-
-	torch::Tensor output = torch::zeros( { input.size(0), input.size(1), input.size(2) }, options);
-
-	hadamard_gpu(input, output);
-
-	return output;
-}
-
-torch::Tensor sorf_matrix_gpu(torch::Tensor input, torch::Tensor scaling, int nfeatures) {
+torch::Tensor sorf_matrix_gpu(torch::Tensor input, torch::Tensor scaling) {
 
 	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
 
 	int natoms = input.size(0);
+	int nfeatures = scaling.size(1) * scaling.size(2);
 
 	auto options = torch::TensorOptions().dtype(torch::kFloat32).layout(torch::kStrided).device(torch::kCUDA);
 
@@ -159,11 +114,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 	m.def("CosFeaturesCUDA", &CosFeaturesCUDA, "");
 	m.def("CosDerivativeFeaturesCUDA", &CosDerivativeFeaturesCUDA, "");
 	m.def("hadamard_transform_gpu", &hadamard_transform_gpu, "hadamard transform");
-	m.def("hadamard_transform_gpu2", &hadamard_transform_gpu2, "hadamard transform");
-	m.def("hadamard_transform_gpu3", &hadamard_transform_gpu3, "hadamard transform");
 
-	m.def("hadamard_transform_backwards_gpu2", &hadamard_transform_backwards_gpu2, "hadamard backwards transform");
-	m.def("hadamard_transform_backwards_gpu3", &hadamard_transform_backwards_gpu3, "hadamard backwards transform");
+	m.def("hadamard_transform_backwards_gpu", &hadamard_transform_backwards_gpu, "hadamard backwards transform");
 
 	m.def("compute_partial_feature_derivatives", &compute_partial_feature_derivatives, "");
 	m.def("compute_molecular_featurization_derivative", &compute_molecular_featurization_derivative, "");

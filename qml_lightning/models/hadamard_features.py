@@ -7,7 +7,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, SORFTransformCuda, SORFTransformCuda3, CosFeatures
+from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, SORFTransformCuda, CosFeatures
 
 from qml_lightning.cuda.sorf_gpu import compute_hadamard_features, sorf_matrix_gpu, compute_partial_feature_derivatives, compute_molecular_featurization_derivative
 from qml_lightning.models.kernel import BaseKernel
@@ -16,8 +16,8 @@ from qml_lightning.representations.dimensionality_reduction import project_repre
 
 class HadamardFeaturesModel(BaseKernel):
     
-    def __init__(self, rep=None, elements=np.array([1, 6, 7, 8]), ntransforms=1, sigma=3.0, llambda=1e-11,
-                 nfeatures=8192, npcas=128, nbatch_train=64, nbatch_test=64):
+    def __init__(self, rep=None, elements=np.array([1, 6, 7, 8]), ntransforms=1, sigma=3.0, llambda=1e-11, npcas=128,
+                 nbatch_train=64, nbatch_test=64, nstacks=32):
         
         super(HadamardFeaturesModel, self).__init__(rep, elements, sigma, llambda)
         
@@ -25,8 +25,9 @@ class HadamardFeaturesModel(BaseKernel):
         self.device = torch.device('cuda' if cuda else 'cpu')
         
         self.ntransforms = ntransforms
-  
-        self.nfeatures = nfeatures
+        
+        self.nstacks = nstacks
+
         self.nbatch_train = nbatch_train
         self.nbatch_test = nbatch_test
         
@@ -34,21 +35,19 @@ class HadamardFeaturesModel(BaseKernel):
 
         self.npcas = npcas
 
-        self.Dmat = get_SORF_diagonals(elements, ntransforms, nfeatures, npcas)
-        self.bk = get_bias(elements, nfeatures)
-        
-        self.Dmat_for_backwards = {}
-            
-        for e in self.elements:
-            self.Dmat_for_backwards[e] = self.Dmat[e].reshape(self.ntransforms, int(self.nfeatures / self.npcas), self.npcas)
+        self.Dmat = get_SORF_diagonals(elements, ntransforms, nstacks, npcas)
+        self.bk = get_bias(elements, nstacks * npcas)
         
         self.is_trained = False
-        self.alpha = torch.zeros(self.nfeatures, device=self.device, dtype=torch.float)
+        self.alpha = torch.zeros(self.nfeatures(), device=self.device, dtype=torch.float)
     
+    def nfeatures(self):
+        return self.npcas * self.nstacks
+
     def calculate_features(self, representation, element, indexes, feature_matrix, grad=None, derivative_features=None):
         coeff_normalisation = np.sqrt(representation.shape[1]) / self.sigma
 
-        coeffs = coeff_normalisation * sorf_matrix_gpu(representation, self.Dmat[element], self.nfeatures)
+        coeffs = coeff_normalisation * sorf_matrix_gpu(representation, self.Dmat[element])
 
         compute_hadamard_features(coeffs, self.bk[element], indexes, feature_matrix)
         
@@ -67,7 +66,7 @@ class HadamardFeaturesModel(BaseKernel):
             print ("Reductors not initialised.")
             exit()
         
-        feature_derivative = torch.zeros(nbatch, max_natoms, 3, self.nfeatures, dtype=torch.float64, device=device)
+        feature_derivative = torch.zeros(nbatch, max_natoms, 3, self.nfeatures(), dtype=torch.float64, device=device)
 
         for j in range(max_natoms):
 
@@ -79,7 +78,7 @@ class HadamardFeaturesModel(BaseKernel):
                 
                 gto_plus = rep.get_representation(X_copy, Z, atomIDs, molIDs, natom_counts)
                 
-                features_plus = torch.zeros(nbatch, self.nfeatures, dtype=torch.float64, device=device)
+                features_plus = torch.zeros(nbatch, self.nfeatures(), dtype=torch.float64, device=device)
                 
                 for e in elements:
                     indexes = Z == e
@@ -96,7 +95,7 @@ class HadamardFeaturesModel(BaseKernel):
                 
                 gto_minus = rep.get_representation(X_copy, Z, atomIDs, molIDs, natom_counts)
                 
-                features_minus = torch.zeros(nbatch, self.nfeatures, dtype=torch.float64, device=device)
+                features_minus = torch.zeros(nbatch, self.nfeatures(), dtype=torch.float64, device=device)
                 
                 for e in elements:
                     indexes = Z == e
@@ -138,7 +137,7 @@ class HadamardFeaturesModel(BaseKernel):
         
                 sub_rep = torch_rep[indices]
 
-                Ztrain = torch.zeros(sub_rep.shape[0], self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
+                Ztrain = torch.zeros(sub_rep.shape[0], self.nfeatures(), device=torch.device('cuda'), dtype=torch.float32)
             
                 for e in self.elements:
                     indexes = charges[indices] == e
@@ -150,15 +149,12 @@ class HadamardFeaturesModel(BaseKernel):
                     if (sub.shape[0] == 0): continue
              
                     sub = project_representation(sub, self.reductors[e])
-                    
-                    Dmat = self.Dmat_for_backwards[e]
-                    bias = self.bk[e]
         
-                    coeffs = SORFTransformCuda3.apply(sub, Dmat, coeff_normalisation, self.ntransforms)
+                    coeffs = SORFTransformCuda.apply(sub, self.Dmat[e], coeff_normalisation, self.ntransforms)
                  
                     coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
        
-                    Ztrain += CosFeatures.apply(coeffs, bias, sub_rep.shape[0], batch_indexes)
+                    Ztrain += CosFeatures.apply(coeffs, self.bk[e], sub_rep.shape[0], batch_indexes)
             
                 batch_predictions = torch.matmul(Ztrain, self.alpha)
                 
@@ -254,7 +250,7 @@ class HadamardFeaturesModel(BaseKernel):
              
             torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
             
-            Ztest = torch.zeros(coordinates.shape[0], self.nfeatures, device=torch.device('cuda'), dtype=torch.float32)
+            Ztest = torch.zeros(coordinates.shape[0], self.nfeatures(), device=torch.device('cuda'), dtype=torch.float32)
             
             for e in self.elements:
            
@@ -267,15 +263,12 @@ class HadamardFeaturesModel(BaseKernel):
                 if (sub.shape[0] == 0): continue
                 
                 sub = project_representation(sub, self.reductors[e])
-
-                Dmat = self.Dmat_for_backwards[e]
-                bias = self.bk[e]
         
-                coeffs = SORFTransformCuda3.apply(sub, Dmat, coeff_normalisation, self.ntransforms)
+                coeffs = SORFTransformCuda.apply(sub, self.Dmat[e], coeff_normalisation, self.ntransforms)
                  
                 coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
                 
-                Ztest += CosFeatures.apply(coeffs, bias, coordinates.shape[0], batch_indexes)
+                Ztest += CosFeatures.apply(coeffs, self.bk[e], coordinates.shape[0], batch_indexes)
    
             total_energies = torch.matmul(Ztest, self.alpha.float())
             
@@ -312,6 +305,7 @@ class HadamardFeaturesModel(BaseKernel):
                 'nbatch_train': self.nbatch_train,
                 'nbatch_test': self.nbatch_test,
                 'npcas': self.npcas,
+                'nstacks': self.nstacks,
                 'is_trained': self.is_trained,
                 '_subtract_self_energies':self._subtract_self_energies,
                 'sigma': self.sigma,
@@ -332,7 +326,9 @@ class HadamardFeaturesModel(BaseKernel):
     def load_model(self, file_name="model"):
         
         data = np.load(file_name  if ".npy" in file_name else file_name + ".npy", allow_pickle=True)[()]
-    
+        
+        print (data)
+        
         self.elements = data['elements']
         self.species = torch.from_numpy(self.elements).float().cuda()
         self.sigma = data['sigma']
@@ -342,14 +338,17 @@ class HadamardFeaturesModel(BaseKernel):
         self.nfeatures = data['nfeatures']
         self.nbatch_train = data['nbatch_train']
         self.nbatch_test = data['nbatch_test']
+        
         self.npcas = data['npcas']
+        self.nstacks = data['nstacks']
+        
         self.is_trained = data['is_trained']
         self.alpha = torch.from_numpy(data['alpha']).double().cuda()
         
         self._subtract_self_energies = data['_subtract_self_energies']
 
         if (self._subtract_self_energies):
-            self.self_energy = torch.from_numpy(data['self_energies']).float().cuda()
+            self.self_energy = torch.from_numpy(data['self_energies']).float()
             
         self.Dmat = {}
         self.bk = {}
@@ -360,23 +359,3 @@ class HadamardFeaturesModel(BaseKernel):
             self.bk[e] = torch.from_numpy(data[f'bk_{e}']).cuda()
             self.reductors[e] = torch.from_numpy(data[f'reductors_{e}']).cuda()
         
-        self.Dmat_for_backwards = {}
-        
-        for e in self.elements:
-            self.Dmat_for_backwards[e] = self.Dmat[e].reshape(self.ntransforms, int(self.nfeatures / self.npcas), self.npcas)
-        
-#         print (self.alpha)
-#         print (self.elements)
-#         print (self.nfeatures)
-#         print (self.nbatch_train)
-#         print (self.nbatch_test)
-#         print (self.npcas)
-#         print (self.is_trained)
-#         print (self._subtract_self_energies)
-#         print (self.self_energy)
-#         
-#         print (self.Dmat)
-#         print (self.bk)
-#         print (self.reductors)
-#         print (self.Dmat_for_backwards)
-    
