@@ -239,14 +239,17 @@ class BaseKernel(torch.nn.Module):
         
         start.record()
         
-        nsub_features = int(self.nfeatures() / ntiles)
+        nsub_features = int(np.ceil(self.nfeatures() / ntiles))
         
         print ("n features: ", self.nfeatures())
-        
+
         for tile in range(0, ntiles):
             
             if (ntiles > 1):
-                tile_size = nsub_features if tile != ntiles - 1 else self.nfeatures() - tile * nsub_features 
+                start_tile = tile * nsub_features
+                end_tile = min(nsub_features * (tile + 1), self.nfeatures())
+                
+                tile_size = end_tile - start_tile
                 
                 if (print_info):
                     print ("tile:", tile + 1 , "of", ntiles, "tiles, tile size:", tile_size)
@@ -328,15 +331,15 @@ class BaseKernel(torch.nn.Module):
                     Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
                 
                 if (ntiles > 1):
-
-                    sub = Ztrain[:, tile * nsub_features:(tile + 1) * nsub_features]
+                    
+                    sub = Ztrain[:, start_tile:end_tile]
                     
                     if (use_specialized_matmul):
                         matmul_and_reduce(sub.float().T, Ztrain.float(), ZTZ_tile)
                     else:
                         ZTZ_tile += torch.matmul(sub.T, Ztrain)
                     
-                    ZtrainY[ tile * nsub_features:(tile + 1) * nsub_features,:] += torch.matmul(sub.T, targets)
+                    ZtrainY[ start_tile:end_tile,:] += torch.matmul(sub.T, targets)
                     
                 else:
                     if (cpu_solve):
@@ -362,9 +365,9 @@ class BaseKernel(torch.nn.Module):
             
             if (ntiles > 1):
                 if (cpu_solve):
-                    ZTZ[tile * nsub_features:(tile + 1) * nsub_features,:] += ZTZ_tile.cpu()
+                    ZTZ[start_tile:end_tile,:] += ZTZ_tile.cpu()
                 else:
-                    ZTZ[tile * nsub_features:(tile + 1) * nsub_features,:] += ZTZ_tile
+                    ZTZ[start_tile:end_tile,:] += ZTZ_tile
                 
         end.record()
         torch.cuda.synchronize()
