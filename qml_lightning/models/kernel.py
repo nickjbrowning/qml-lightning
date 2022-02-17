@@ -27,7 +27,7 @@ class BaseKernel(torch.nn.Module):
         
         self._convert_from_hartree_to_kcal = False
         
-        self.hartree2kcalmol = 627.503
+        self.hartree2kcalmol = 627.5
         
         self._subtract_self_energies = False
         
@@ -240,8 +240,6 @@ class BaseKernel(torch.nn.Module):
         start.record()
         
         nsub_features = int(np.ceil(self.nfeatures() / ntiles))
-        
-        print ("n features: ", self.nfeatures())
 
         for tile in range(0, ntiles):
             

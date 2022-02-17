@@ -327,7 +327,7 @@ class HadamardFeaturesModel(BaseKernel):
         
         data = np.load(file_name  if ".npy" in file_name else file_name + ".npy", allow_pickle=True)[()]
         
-        print (data)
+        # print (data)
         
         self.elements = data['elements']
         self.species = torch.from_numpy(self.elements).float().cuda()
