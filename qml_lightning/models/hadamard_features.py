@@ -6,9 +6,8 @@ Created on 3 May 2021
 import torch
 import numpy as np
 from tqdm import tqdm
-
 from qml_lightning.features.SORF import get_SORF_diagonals, get_bias, SORFTransformCuda, CosFeatures
-
+import time
 from qml_lightning.cuda.sorf_gpu import compute_hadamard_features, sorf_matrix_gpu, compute_partial_feature_derivatives, compute_molecular_featurization_derivative
 from qml_lightning.models.kernel import BaseKernel
 from qml_lightning.representations.dimensionality_reduction import project_representation, project_derivative
@@ -202,7 +201,7 @@ class HadamardFeaturesModel(BaseKernel):
                 natom_counts = data['natom_counts']
                 zcells = data['cells']
                 
-                result = self.predict_opt(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, max_natoms, forces=forces, print_info=False, profiler=False)
+                result = self.predict_opt(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, forces=forces, print_info=False, profiler=False)
                 
                 if (forces):
                     predict_energies[i:i + self.nbatch_test] = result[0]
@@ -229,7 +228,7 @@ class HadamardFeaturesModel(BaseKernel):
         else:
             return predict_energies
         
-    def predict_opt(self, coordinates, charges, atomIDs, molIDs, natom_counts, zcells, max_natoms,
+    def predict_opt(self, coordinates, charges, atomIDs, molIDs, natom_counts, zcells,
                     forces=True, print_info=True, profiler=False):
         
         with torch.autograd.profiler.profile(enabled=profiler, use_cuda=True, with_stack=True) as prof:
@@ -247,37 +246,37 @@ class HadamardFeaturesModel(BaseKernel):
 
             if (forces):
                 coordinates.requires_grad = True
-             
+      
             torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
-            
+    
             Ztest = torch.zeros(coordinates.shape[0], self.nfeatures(), device=torch.device('cuda'), dtype=torch.float32)
             
             for e in self.elements:
-           
+                 
                 indexes = charges.int() == e
-                
+                 
                 batch_indexes = torch.where(indexes)[0].type(torch.int)
-                
+                 
                 sub = torch_rep[indexes]
                 
                 if (sub.shape[0] == 0): continue
-                
+                    
                 sub = project_representation(sub, self.reductors[e])
-        
+            
                 coeffs = SORFTransformCuda.apply(sub, self.Dmat[e], coeff_normalisation, self.ntransforms)
-                 
+                  
                 coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
-                
+                 
                 Ztest += CosFeatures.apply(coeffs, self.bk[e], coordinates.shape[0], batch_indexes)
    
             total_energies = torch.matmul(Ztest, self.alpha.float())
             
             if (forces):
                 forces_torch, = torch.autograd.grad(-total_energies.sum(), coordinates)
-      
+            
             end.record()
             torch.cuda.synchronize()
-        
+
         # if (profiler):
             # <FunctionEventAvg key=cudaEventCreateWithFlags self_cpu_time=6.000us cpu_time=1.500us  self_cuda_time=0.000us cuda_time=0.000us input_shapes= cpu_memory_usage=0 cuda_memory_usage=0>
             # print(prof.key_averages()[0])

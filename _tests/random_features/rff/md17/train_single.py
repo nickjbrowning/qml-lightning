@@ -20,7 +20,7 @@ if __name__ == "__main__":
     parser.add_argument("-sigma", type=float, default=3.0)
     parser.add_argument("-llambda", type=float, default=1e-12)
     parser.add_argument("-npcas", type=int, default=128)
-    parser.add_argument("-nfeatures", type=int, default=8192)
+    parser.add_argument("-nstacks", type=int, default=128)
     
     '''representation parameters'''
     parser.add_argument("-eta", type=float, default=2.0)

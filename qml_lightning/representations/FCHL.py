@@ -33,20 +33,16 @@ class FCHLFunction(torch.autograd.Function):
             inv_cell = torch.inverse(cell)
             
         nneighbours = pairlist_gpu.get_num_neighbours_gpu(X, atom_counts, rcut,
-                                                         cell , inv_cell)
-        
-        # print (nneighbours)
-        
-        # print (torch.mean(nneighbours.float()))
+                                                      cell , inv_cell)
         
         max_neighbours = nneighbours.max().item()
      
         neighbourlist = pairlist_gpu.get_neighbour_list_gpu(X, atom_counts, max_neighbours, rcut,
                                                             cell, inv_cell)
-         
-        element_types = egto_gpu.get_element_types_gpu(X, Z, atom_counts, species) 
         
-        ctx.save_for_backward(X, Z, species, atomIDs, molIDs, element_types, neighbourlist, nneighbours)
+        element_types = egto_gpu.get_element_types_gpu(X, Z.float(), atom_counts, species) 
+        
+        ctx.save_for_backward(X, Z.float(), species, atomIDs, molIDs, element_types, neighbourlist, nneighbours)
         
         ctx.Rs2 = Rs2
         ctx.Rs3 = Rs3
@@ -56,8 +52,24 @@ class FCHLFunction(torch.autograd.Function):
         ctx.three_body_weight = three_body_weight
         ctx.three_body_decay = three_body_decay 
         ctx.rcut = rcut
+        
+        '''
+        
+        __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
+        const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
+        const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
+        const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
+        const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs, // blockIdx -> atom idx
+        const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs, // blockIdx -> molecule jdx
+        const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
+        const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> nneighbours, const int max_neighbours,
+        const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> Rs2,
+        const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight,
+        float three_body_decay, float rcut, torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output) {
 
-        output = fchl_gpu.get_fchl_representation(X, Z, species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+        '''
+
+        output = fchl_gpu.get_fchl_representation(X, Z, species.float(), element_types, atomIDs, molIDs, neighbourlist, nneighbours,
                                Rs2, Rs3, eta2, eta3, two_body_decay, three_body_weight, three_body_decay,
                                rcut)
         
@@ -193,7 +205,7 @@ class FCHLCuda(torch.nn.Module):
                 rep_derivative_fd[:,:, i, x,:] = (gto_plus - gto_minus) / (2.0 * dx)
                 
         return rep_derivative_fd
-
+    
     def forward(self, X, Z, atomIDs, molIDs, atom_counts, cell):
         return FCHLFunction.apply(X, (Z, self.species, atomIDs, molIDs, atom_counts, cell,
                 self.Rs2, self.Rs3, self.eta2, self.eta3, self.two_body_decay, self.three_body_weight, self.three_body_decay, self.high_cutoff))

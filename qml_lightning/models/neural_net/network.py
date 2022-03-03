@@ -15,7 +15,8 @@ class SimpleFeedForwardNetwork(pl.LightningModule):
         super(SimpleFeedForwardNetwork, self).__init__()
 
         n_nets = len(species)
-      
+        
+        self.species = species
         self.element_mask = ElementMask(species, device=fingerprint.device)
         self.fingerprint = fingerprint
         self.element_to_id = self.fingerprint.element_to_id
@@ -40,6 +41,19 @@ class SimpleFeedForwardNetwork(pl.LightningModule):
     def forward(self, coordinates, nuclear_charges, natom_counts):
 
         fingerprint = self.fingerprint(coordinates, nuclear_charges, natom_counts)
+#         
+#         nets = torch.tensor([], device=torch.device('cuda'))
+#         
+#         for i, e in enumerate(self.species):
+#             idx = nuclear_charges == e
+#             
+#             sub = fingerprint[idx]
+#             
+#             test = self.networks[i](sub)
+#             
+#             nets = torch.cat((nets, test))
+#         
+#         return nets.reshape(fingerprint.shape[0], fingerprint.shape[1])
 
         return torch.sum(self.element_mask(nuclear_charges) * 
                          torch.cat([net(fingerprint) for net in self.networks], dim=2), dim=2)
@@ -126,14 +140,48 @@ class SimpleFeedForwardNetwork(pl.LightningModule):
             self.log('test_force_rmse', force_rmse)
         
         return loss
+    
+    # The ReduceLROnPlateau scheduler requires a monitor
+#     def configure_optimizers(self):
+#         optimizer = torch.optim.AdamW(params=self.parameters(), lr=self.learning_rate)
+#         
+#         return {
+#             "optimizer": optimizer,
+#             "lr_scheduler": {
+#                 "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min'),
+#                 "monitor": "val_loss",
+#                 "frequency": 5
+#             },
+#         }
+
+#     def configure_optimizers(self):
+#         optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=1e-4)
+#          
+#         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.997)
+#         # return {
+#        # 'optimizer': optimizer,
+#        # 'lr_scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=500, threshold=1e-4),
+#        # 'monitor': 'val_loss'
+#         # }
+#          
+#         return [optimizer], [scheduler]
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+
+        learning_rate = 1000.0 ** (-0.5)     
+        optimizer = torch.optim.AdamW(params=self.parameters(), lr=learning_rate)     
+        warmup_steps = 5
+        lr_lambda = lambda epoch: learning_rate * min((epoch + 1) ** (-0.5), (epoch + 1) * warmup_steps ** (-1.5))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, verbose=False)
         
-        # return {
-       # 'optimizer': optimizer,
-       # 'lr_scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=500, threshold=1e-4),
-       # 'monitor': 'val_loss'
-        # }
+        return {
+            "optimizer": optimizer,
+            "scheduler": scheduler,
+            "frequency": 1,
+            "interval": "epoch"
+            
+            }
+        # optimizer = AdamW(self.parameters(), lr=1e-3, weight_decay=1e-4)
+        # scheduler = ReduceLROnPlateau(optimizer, ...)
         
-        return optimizer
+        # return [optimizer], [scheduler]

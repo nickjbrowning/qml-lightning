@@ -838,6 +838,11 @@ void get_element_types_kernel(const torch::PackedTensorAccessor32<float, 3, torc
 			element_types[blockIdx.x][iatom] = index;
 		}
 	}
+
+//	for (int iatom = threadIdx.x; iatom < natoms; iatom += blockDim.x) {
+//		printf("blockDim: %d, natoms: %d, block: %d, thread %d, element_type: %d\n", blockDim.x, natoms, blockIdx.x, threadIdx.x,
+//				element_types[blockIdx.x][iatom]);
+//	}
 }
 
 void getElementTypesCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natom_counts, torch::Tensor species, torch::Tensor element_types) {

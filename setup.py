@@ -18,8 +18,8 @@ __url__ = "TODO"
 # optimisation_level_host = '-g'
 # optimisation_level_device = '-G'
 
-optimisation_level_host = '-O1'
-optimisation_level_device = '-O1'
+optimisation_level_host = '-O2'
+optimisation_level_device = '-O2'
 
 
 def readme():

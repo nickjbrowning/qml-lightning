@@ -47,8 +47,7 @@ class EGTOCuda(Representation):
             self.offset = torch.linspace(np.exp(-0.4), np.exp(-self.high_cutoff), ngaussians).cuda()
         else:
             self.offset = torch.linspace(0.0, self.high_cutoff, ngaussians + 1)[1:].cuda()
-        
-        print (self.offset)
+
         mbody_list = torch.zeros(species.shape[0], species.shape[0], dtype=torch.int32)
         
         count = 0
