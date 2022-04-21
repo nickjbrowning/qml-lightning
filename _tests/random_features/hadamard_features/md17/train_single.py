@@ -103,8 +103,11 @@ if __name__ == "__main__":
     
     # rep = EGTOCuda(species=unique_z, high_cutoff=rcut, ngaussians=ngaussians, eta=eta, lmax=lmax, inv_factors=[2.0, 2.0, 2.0], lchannel_weights=[0.5, 1.3, 1.0])
 
-    model = HadamardFeaturesModel(rep, elements=unique_z, ntransforms=ntransforms, sigma=sigma, llambda=llambda,
-                                nfeatures=nfeatures, npcas=npcas, nbatch=nbatch)
+    model = HadamardFeaturesModel(rep, elements=unique_z, 
+                                  ntransforms=ntransforms, 
+                                  sigma=sigma, llambda=llambda,
+                                nfeatures=nfeatures, 
+                                npcas=npcas, nbatch=nbatch)
     
     print ("Calculating projection matrices...")
     model.get_reductors([coords[i] for i in reductor_samples], [nuclear_charges[i]for i in reductor_samples], npcas=npcas)

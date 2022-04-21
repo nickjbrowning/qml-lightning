@@ -4,25 +4,29 @@
 using namespace at;
 using namespace std;
 
-void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3,
-		float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output);
+void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell, torch::Tensor inv_cell,
+		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3,
+		float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output);
 
 void FCHLRepresentationAndDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
-		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3,
-		float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output, torch::Tensor grad);
+		torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist,
+		torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight,
+		float three_body_decay, float rcut, torch::Tensor output, torch::Tensor grad);
 
-void FCHLDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3,
-		float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor grad);
+void FCHLDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
+		torch::Tensor grad);
 
-void FCHLBackwardsCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3,
-		float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor grad_in, torch::Tensor grad_out);
+void FCHLBackwardsCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
+		torch::Tensor grad_in, torch::Tensor grad_out);
 
-torch::Tensor get_fchl_representation(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
-		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor two_body_gridpoints,
-		torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut) {
+torch::Tensor get_fchl_representation(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor two_body_gridpoints, torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay, float three_body_weight,
+		float three_body_decay, float rcut) {
 
 	torch::Tensor clone_coordinates;
 	torch::Tensor clone_charges;
@@ -48,16 +52,17 @@ torch::Tensor get_fchl_representation(torch::Tensor coordinates, torch::Tensor c
 
 	torch::Tensor output = torch::zeros( { nbatch, natoms, repsize }, options);
 
-	FCHLCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints, three_body_gridpoints,
-			eta2, eta3, two_body_decay, three_body_weight, three_body_decay, rcut, output);
+	FCHLCuda(coordinates, charges, species, element_types, cell, inv_cell, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints,
+			three_body_gridpoints, eta2, eta3, two_body_decay, three_body_weight, three_body_decay, rcut, output);
 
 	return output;
 
 }
 
-torch::Tensor get_fchl_derivative(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
-		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor two_body_gridpoints,
-		torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut) {
+torch::Tensor get_fchl_derivative(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor two_body_gridpoints, torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay, float three_body_weight,
+		float three_body_decay, float rcut) {
 
 	torch::Tensor clone_coordinates;
 	torch::Tensor clone_charges;
@@ -83,17 +88,17 @@ torch::Tensor get_fchl_derivative(torch::Tensor coordinates, torch::Tensor charg
 
 	torch::Tensor output_deriv = torch::zeros( { nbatch, natoms, natoms, 3, repsize }, options);
 
-	FCHLDerivativeCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints,
+	FCHLDerivativeCuda(coordinates, charges, species, element_types, cell, inv_cell, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints,
 			three_body_gridpoints, eta2, eta3, two_body_decay, three_body_weight, three_body_decay, rcut, output_deriv);
 
 	return output_deriv;
 
 }
 
-torch::Tensor fchl_backwards(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor two_body_gridpoints,
-		torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
-		torch::Tensor grad_in) {
+torch::Tensor fchl_backwards(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor two_body_gridpoints, torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay, float three_body_weight,
+		float three_body_decay, float rcut, torch::Tensor grad_in) {
 
 	torch::Tensor clone_coordinates;
 	torch::Tensor clone_charges;
@@ -112,7 +117,7 @@ torch::Tensor fchl_backwards(torch::Tensor coordinates, torch::Tensor charges, t
 
 	torch::Tensor output_deriv = torch::zeros( { nbatch, natoms, 3 }, options);
 
-	FCHLBackwardsCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints,
+	FCHLBackwardsCuda(coordinates, charges, species, element_types, cell, inv_cell, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints,
 			three_body_gridpoints, eta2, eta3, two_body_decay, three_body_weight, three_body_decay, rcut, grad_in, output_deriv);
 
 	return output_deriv;
@@ -120,9 +125,9 @@ torch::Tensor fchl_backwards(torch::Tensor coordinates, torch::Tensor charges, t
 }
 
 std::vector<torch::Tensor> get_fchl_and_derivative(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
-		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor two_body_gridpoints,
-		torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
-		bool gradients) {
+		torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist,
+		torch::Tensor nneighbours, torch::Tensor two_body_gridpoints, torch::Tensor three_body_gridpoints, float eta2, float eta3, float two_body_decay,
+		float three_body_weight, float three_body_decay, float rcut, bool gradients) {
 
 	torch::Tensor clone_coordinates;
 	torch::Tensor clone_charges;
@@ -151,7 +156,7 @@ std::vector<torch::Tensor> get_fchl_and_derivative(torch::Tensor coordinates, to
 		torch::Tensor output = torch::zeros( { nbatch, natoms, repsize }, options);
 		torch::Tensor output_deriv = torch::zeros( { nbatch, natoms, natoms, 3, repsize }, options);
 
-		FCHLRepresentationAndDerivativeCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours,
+		FCHLRepresentationAndDerivativeCuda(coordinates, charges, species, element_types, cell, inv_cell, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours,
 				two_body_gridpoints, three_body_gridpoints, eta2, eta3, two_body_decay, three_body_weight, three_body_decay, rcut, output, output_deriv);
 
 		return {output, output_deriv};
@@ -159,7 +164,7 @@ std::vector<torch::Tensor> get_fchl_and_derivative(torch::Tensor coordinates, to
 
 		torch::Tensor output = torch::zeros( { nbatch, natoms, repsize }, options);
 
-		FCHLCuda(coordinates, charges, species, element_types, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints,
+		FCHLCuda(coordinates, charges, species, element_types, cell, inv_cell, blockAtomIDs, blockMolIDs, neighbourlist, nneighbours, two_body_gridpoints,
 				three_body_gridpoints, eta2, eta3, two_body_decay, three_body_weight, three_body_decay, rcut, output);
 
 		return {output};

@@ -42,7 +42,7 @@ class FCHLFunction(torch.autograd.Function):
         
         element_types = egto_gpu.get_element_types_gpu(X, Z.float(), atom_counts, species) 
         
-        ctx.save_for_backward(X, Z.float(), species, atomIDs, molIDs, element_types, neighbourlist, nneighbours)
+        ctx.save_for_backward(X, Z.float(), species, atomIDs, molIDs, element_types, cell, inv_cell, neighbourlist, nneighbours)
         
         ctx.Rs2 = Rs2
         ctx.Rs3 = Rs3
@@ -52,24 +52,8 @@ class FCHLFunction(torch.autograd.Function):
         ctx.three_body_weight = three_body_weight
         ctx.three_body_decay = three_body_decay 
         ctx.rcut = rcut
-        
-        '''
-        
-        __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
-        const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
-        const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
-        const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
-        const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs, // blockIdx -> atom idx
-        const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs, // blockIdx -> molecule jdx
-        const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
-        const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> nneighbours, const int max_neighbours,
-        const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> Rs2,
-        const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight,
-        float three_body_decay, float rcut, torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output) {
 
-        '''
-
-        output = fchl_gpu.get_fchl_representation(X, Z, species.float(), element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+        output = fchl_gpu.get_fchl_representation(X, Z, species.float(), element_types, cell, inv_cell, atomIDs, molIDs, neighbourlist, nneighbours,
                                Rs2, Rs3, eta2, eta3, two_body_decay, three_body_weight, three_body_decay,
                                rcut)
         
@@ -83,9 +67,9 @@ class FCHLFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, gradX):
         
-        X, Z, species, atomIDs, molIDs, element_types, neighbourlist, nneighbours = ctx.saved_tensors
+        X, Z, species, atomIDs, molIDs, element_types, cell, inv_cell, neighbourlist, nneighbours = ctx.saved_tensors
         
-        grad_out = fchl_gpu.fchl_backwards(X, Z, species, element_types, atomIDs, molIDs, neighbourlist, nneighbours,
+        grad_out = fchl_gpu.fchl_backwards(X, Z, species, element_types, cell, inv_cell, atomIDs, molIDs, neighbourlist, nneighbours,
                                ctx.Rs2, ctx.Rs3, ctx.eta2, ctx.eta3, ctx.two_body_decay, ctx.three_body_weight, ctx.three_body_decay,
                                ctx.rcut, gradX)
         

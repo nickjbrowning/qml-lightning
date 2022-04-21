@@ -13,7 +13,7 @@ using namespace std;
 
 #define SQRT2PI 2.506628275f
 
-__device__ void get_pbc_dij(float *drij, float *cell_vectors, float *inv_cell_vectors) {
+__device__ void get_pbc_drij(float *drij, float *cell_vectors, float *inv_cell_vectors) {
 
 	/*
 	 *   h := [a, b, c], a=(a1,a2,a3), ... (the matrix of box vectors)
@@ -219,6 +219,8 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
 		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> cell,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> inv_cell,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs, // blockIdx -> atom idx
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs, // blockIdx -> molecule jdx
 		const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
@@ -243,11 +245,30 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 	float *sRs3 = (float*) &sRs2[nRs2];
 	//float *sRep = (float*) &sRs3[nRs3];
 
+	float *scell = (float*) &sRs3[nRs3];
+	float *sinv_cell = (float*) &sinv_cell[9];
+
 	//int repsize = nelements * nRs2 + (nelements * (nelements + 1)) * nRs3;
 
 	int molID = blockMolIDs[blockIdx.x];
 	int iatom = blockAtomIDs[blockIdx.x];
 	int nneighbours_i = nneighbours[molID][iatom];
+
+	bool pbc = false;
+
+	if (cell.size(0) > 0) {
+
+		pbc = true;
+
+		if (threadIdx.x == 0 && threadIdx.y == 0) {
+			for (int j = 0; j < 3; j++) {
+				scell[threadIdx.x * 3 + j] = cell[batchID][threadIdx.x][j];
+				sinv_cell[threadIdx.x * 3 + j] = inv_cell[batchID][threadIdx.x][j];
+			}
+		}
+	}
+
+	__syncthreads();
 
 	for (int jatom = threadIdx.y * blockDim.x + threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x * blockDim.y) {
 
@@ -301,6 +322,10 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 		drij[0] = ri[0] - rj[0];
 		drij[1] = ri[1] - rj[1];
 		drij[2] = ri[2] - rj[2];
+
+		if (pbc) {
+			get_pbc_drij(drij, scell, sinv_cell);
+		}
 
 		float rij = sqrtf(drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2]);
 
@@ -383,6 +408,8 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
 		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> cell,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> inv_cell,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs,
 		const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
@@ -659,6 +686,8 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
 		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> cell,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> inv_cell,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs, // blockIdx -> atom idx
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs, // blockIdx -> molecule jdx
 		const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
@@ -919,6 +948,8 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
 		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> cell,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> inv_cell,
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs, // blockIdx -> atom idx
 		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs, // blockIdx -> molecule jdx
 		const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
@@ -1261,9 +1292,9 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 	}
 }
 
-void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3,
-		float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output) {
+void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell, torch::Tensor inv_cell,
+		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3,
+		float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output) {
 
 	const int nthreadsx = 64;
 	const int nthreadsy = 1;
@@ -1288,6 +1319,8 @@ void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
 			element_types.packed_accessor32<int, 2, torch::RestrictPtrTraits>(),
+			cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			blockAtomIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			blockMolIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			neighbourlist.packed_accessor32<int, 3, torch::RestrictPtrTraits>(),
@@ -1303,9 +1336,10 @@ void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 
 }
 
-void FCHLDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3,
-		float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor grad) {
+void FCHLDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
+		torch::Tensor grad) {
 
 	const int nthreads = 32;
 
@@ -1323,6 +1357,8 @@ void FCHLDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch:
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
 			element_types.packed_accessor32<int, 2, torch::RestrictPtrTraits>(),
+			cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			blockAtomIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			blockMolIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			neighbourlist.packed_accessor32<int, 3, torch::RestrictPtrTraits>(),
@@ -1337,9 +1373,10 @@ void FCHLDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch:
 
 }
 
-void FCHLBackwardsCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
-		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3,
-		float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor grad_in, torch::Tensor grad_out) {
+void FCHLBackwardsCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
+		torch::Tensor grad_in, torch::Tensor grad_out) {
 
 	const int nthreadsx = 16;
 	const int nthreadsy = 8;
@@ -1362,6 +1399,8 @@ void FCHLBackwardsCuda(torch::Tensor coordinates, torch::Tensor charges, torch::
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
 			element_types.packed_accessor32<int, 2, torch::RestrictPtrTraits>(),
+			cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			blockAtomIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			blockMolIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			neighbourlist.packed_accessor32<int, 3, torch::RestrictPtrTraits>(),
@@ -1378,8 +1417,9 @@ void FCHLBackwardsCuda(torch::Tensor coordinates, torch::Tensor charges, torch::
 }
 
 void FCHLRepresentationAndDerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
-		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3,
-		float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output, torch::Tensor grad) {
+		torch::Tensor cell, torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist,
+		torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight,
+		float three_body_decay, float rcut, torch::Tensor output, torch::Tensor grad) {
 
 	const int nthreads = 32;
 
@@ -1397,6 +1437,8 @@ void FCHLRepresentationAndDerivativeCuda(torch::Tensor coordinates, torch::Tenso
 			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
 			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
 			element_types.packed_accessor32<int, 2, torch::RestrictPtrTraits>(),
+			cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
 			blockAtomIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			blockMolIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
 			neighbourlist.packed_accessor32<int, 3, torch::RestrictPtrTraits>(),
