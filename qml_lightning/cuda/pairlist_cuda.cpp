@@ -7,7 +7,13 @@ using namespace std;
 void getNumNeighboursCUDA(torch::Tensor coordinates, torch::Tensor natoms, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
 		torch::Tensor num_neighbours);
 
+void getNumNeighboursCUDA_shared(torch::Tensor coordinates, torch::Tensor natoms, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
+		torch::Tensor num_neighbours);
+
 void getNeighbourListCUDA(torch::Tensor coordinates, torch::Tensor natoms, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
+		torch::Tensor neighbour_list);
+
+void getNeighbourListCUDA_shared(torch::Tensor coordinates, torch::Tensor natoms, float rcut, torch::Tensor lattice_vecs, torch::Tensor inv_lattice_vecs,
 		torch::Tensor neighbour_list);
 
 void safeFillCUDA(torch::Tensor pairlist);

@@ -24,23 +24,27 @@ __device__ void get_pbc_drij(float *drij, float *cell_vectors, float *inv_cell_v
 	 s_ij <-- s_ij - NINT(s_ij)        (general minimum image convention)
 	 r_ij = h s_ij
 	 */
+	float sij[3] = { 0.0, 0.0, 0.0 };
 
-	for (int x = 0; x < 3; x++) {
+	for (int m = 0; m < 3; m++) {
 
-		float sij_x = 0.0;
-		float rij_x = 0.0;
+		for (int k = 0; k < 3; k++) {
 
-		for (int y = 0; y < 3; y++) {
-			sij_x += inv_cell_vectors[x * 3 + y] * drij[x];
+			sij[m] += inv_cell_vectors[m * 3 + k] * drij[k];
 		}
 
-		sij_x = sij_x - round(sij_x);
+		sij[m] = sij[m] - round(sij[m]);
+	}
 
-		for (int y = 0; y < 3; y++) {
-			rij_x += cell_vectors[x * 3 + y] * sij_x;
+	for (int m = 0; m < 3; m++) {
+
+		float rij_m = 0.0;
+
+		for (int k = 0; k < 3; k++) {
+			rij_m += cell_vectors[m * 3 + k] * sij[k];
 		}
 
-		drij[x] = rij_x;
+		drij[m] = rij_m;
 	}
 }
 
@@ -177,8 +181,37 @@ __device__ float get_radial_derivative_distribution(float drijx, float rij, floa
 	return dradial_dx;
 }
 
+__device__ float dot_abcd(float *ab, float *cd) {
+	return ab[0] * cd[0] + ab[1] * cd[1] + ab[2] * cd[2];
+}
+
 __device__ float dot(float *v1, float *v2, float *v3, float *v4) {
 	return (v1[0] - v2[0]) * (v3[0] - v4[0]) + (v1[1] - v2[1]) * (v3[1] - v4[1]) + (v1[2] - v2[2]) * (v3[2] - v4[2]);
+}
+
+//			float cos_1 = calc_cos_angle(rj, ri, rk); // ji, ki
+//			float cos_2 = calc_cos_angle(rj, rk, ri); // jk, ik
+//			float cos_3 = calc_cos_angle(ri, rj, rk); // ij, kj
+
+__device__ float calc_cos_angle_abcb(float *ab, float *cb) {
+
+	float v1norm = sqrt(ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2]);
+	float v2norm = sqrt(cb[0] * cb[0] + cb[1] * cb[1] + cb[2] * cb[2]);
+
+	float v1[3];
+	float v2[3];
+
+	v1[0] = ab[0] / v1norm;
+	v1[1] = ab[1] / v1norm;
+	v1[2] = ab[2] / v1norm;
+
+	v2[0] = cb[0] / v2norm;
+	v2[1] = cb[1] / v2norm;
+	v2[2] = cb[2] / v2norm;
+
+	float cos_angle = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]; //v1.dot(v2);
+
+	return cos_angle;
 }
 
 __device__ float calc_cos_angle(float *a, float *b, float *c) {
@@ -205,6 +238,19 @@ __device__ float calc_cos_angle(float *a, float *b, float *c) {
 __device__ float calc_angle(float *a, float *b, float *c) {
 
 	float cos_angle = calc_cos_angle(a, b, c);
+
+	if (cos_angle > 1.0)
+		cos_angle = 1.0;
+	if (cos_angle < -1.0)
+		cos_angle = -1.0;
+
+	return acosf(cos_angle);
+
+}
+
+__device__ float calc_angle_abcb(float *ab, float *cb) {
+
+	float cos_angle = calc_cos_angle_abcb(ab, cb);
 
 	if (cos_angle > 1.0)
 		cos_angle = 1.0;
@@ -243,43 +289,14 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 
 	float *sRs2 = (float*) &selement_types[max_neighbours];
 	float *sRs3 = (float*) &sRs2[nRs2];
-	//float *sRep = (float*) &sRs3[nRs3];
 
 	float *scell = (float*) &sRs3[nRs3];
-	float *sinv_cell = (float*) &sinv_cell[9];
-
-	//int repsize = nelements * nRs2 + (nelements * (nelements + 1)) * nRs3;
+	float *sinv_cell = (float*) &scell[9];
 
 	int molID = blockMolIDs[blockIdx.x];
 	int iatom = blockAtomIDs[blockIdx.x];
-	int nneighbours_i = nneighbours[molID][iatom];
 
-	bool pbc = false;
-
-	if (cell.size(0) > 0) {
-
-		pbc = true;
-
-		if (threadIdx.x == 0 && threadIdx.y == 0) {
-			for (int j = 0; j < 3; j++) {
-				scell[threadIdx.x * 3 + j] = cell[batchID][threadIdx.x][j];
-				sinv_cell[threadIdx.x * 3 + j] = inv_cell[batchID][threadIdx.x][j];
-			}
-		}
-	}
-
-	__syncthreads();
-
-	for (int jatom = threadIdx.y * blockDim.x + threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x * blockDim.y) {
-
-		int j = neighbourlist[molID][iatom][jatom];
-
-		scoords_x[jatom] = coordinates[molID][j][0];
-		scoords_y[jatom] = coordinates[molID][j][1];
-		scoords_z[jatom] = coordinates[molID][j][2];
-		selement_types[jatom] = element_types[molID][j];
-
-	}
+	int repsize = species.size(0) * nRs2 + (species.size(0) * (species.size(0) + 1)) * nRs3;
 
 	__syncthreads();
 
@@ -294,6 +311,20 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 
 	__syncthreads();
 
+	int nneighbours_i = nneighbours[molID][iatom];
+
+	for (int jatom = threadIdx.y * blockDim.x + threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x * blockDim.y) {
+
+		int j = neighbourlist[molID][iatom][jatom];
+
+		scoords_x[jatom] = coordinates[molID][j][0];
+		scoords_y[jatom] = coordinates[molID][j][1];
+		scoords_z[jatom] = coordinates[molID][j][2];
+		selement_types[jatom] = element_types[molID][j];
+
+	}
+	__syncthreads();
+
 	float ri[3];
 	float rj[3];
 	float rk[3];
@@ -301,12 +332,30 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 	float drij[3];
 	float drik[3];
 	float drjk[3];
+	float drji[3];
+	float drki[3];
+	float drkj[3];
+
+	bool pbc = false;
+
+	if (cell.size(0) > 0) {
+
+		pbc = true;
+
+		if (threadIdx.x == 0 && threadIdx.y == 0) {
+			for (int i = 0; i < 3; i++) {
+				for (int j = 0; j < 3; j++) {
+					scell[i * 3 + j] = cell[molID][i][j];
+					sinv_cell[i * 3 + j] = inv_cell[molID][i][j];
+				}
+			}
+		}
+	}
+	__syncthreads();
 
 	ri[0] = coordinates[molID][iatom][0];
 	ri[1] = coordinates[molID][iatom][1];
 	ri[2] = coordinates[molID][iatom][2];
-
-	float ielement = element_types[molID][iatom];
 
 	float expf_v = expf(-powf(M_PI, 2) * 0.5);
 	float sqrt2pi = sqrtf(2.0 * M_PI);
@@ -326,6 +375,10 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 		if (pbc) {
 			get_pbc_drij(drij, scell, sinv_cell);
 		}
+
+		drji[0] = -drij[0];
+		drji[1] = -drij[1];
+		drji[2] = -drij[2];
 
 		float rij = sqrtf(drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2]);
 
@@ -358,9 +411,20 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 			drik[1] = ri[1] - rk[1];
 			drik[2] = ri[2] - rk[2];
 
-			drjk[0] = rj[0] - rk[0];
-			drjk[1] = rj[1] - rk[1];
-			drjk[2] = rj[2] - rk[2];
+			if (pbc) {
+				get_pbc_drij(drik, scell, sinv_cell);
+			}
+			drjk[0] = drik[0] - drij[0];
+			drjk[1] = drik[1] - drij[1];
+			drjk[2] = drik[2] - drij[2];
+
+			drki[0] = -drik[0];
+			drki[1] = -drik[1];
+			drki[2] = -drik[2];
+
+			drkj[0] = -drjk[0];
+			drkj[1] = -drjk[1];
+			drkj[2] = -drjk[2];
 
 			float rik = sqrt(drik[0] * drik[0] + drik[1] * drik[1] + drik[2] * drik[2]);
 
@@ -371,10 +435,20 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 			float rjk = sqrt(drjk[0] * drjk[0] + drjk[1] * drjk[1] + drjk[2] * drjk[2]);
 
 			float rcutik = get_cutoff(rik, rcut, 0.0, 0);
-			float angle = calc_angle(rj, ri, rk);
-			float cos_1 = calc_cos_angle(rj, ri, rk); // ji, ki
-			float cos_2 = calc_cos_angle(rj, rk, ri); // jk, ik
-			float cos_3 = calc_cos_angle(ri, rj, rk); // ij, kj
+
+			//__device__ float calc_cos_angle(float *a, float *b, float *c) {
+			//float v1norm = sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+			//float v2norm = sqrt((c[0] - b[0]) * (c[0] - b[0]) + (c[1] - b[1]) * (c[1] - b[1]) + (c[2] - b[2]) * (c[2] - b[2]));
+
+			//float angle = calc_angle(rj, ri, rk);
+			float angle = calc_angle_abcb(drji, drki);
+
+			//float cos_1 = calc_cos_angle(rj, ri, rk); // ji, ki
+			float cos_1 = calc_cos_angle_abcb(drji, drki); // ji, ki
+			//float cos_2 = calc_cos_angle(rj, rk, ri); // jk, ik
+			float cos_2 = calc_cos_angle_abcb(drjk, drik); // jk, ik
+			//float cos_3 = calc_cos_angle(ri, rj, rk); // ij, kj
+			float cos_3 = calc_cos_angle_abcb(drij, drkj); // ij, kj
 
 			float ksi3 = three_body_weight * (1.0 + 3 * cos_1 * cos_2 * cos_3) / powf(rij * rik * rjk, three_body_decay);
 
@@ -394,14 +468,9 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 
 				atomicAdd(&output[molID][iatom][z], radial * cos_angle * ksi3);
 				atomicAdd(&output[molID][iatom][z + 1], radial * sin_angle * ksi3);
-
 			}
 		}
 	}
-
-	//for (int i = threadIdx.x; i < repsize; i += blockDim.x) {
-	//	output[molID][iatom][i] = sRep[i];
-	//}
 }
 
 __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
@@ -435,6 +504,9 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 	float *sRs2 = (float*) &sneighbours[max_neighbours];
 	float *sRs3 = (float*) &sRs2[nRs2];
 
+	float *scell = (float*) &sRs3[nRs3];
+	float *sinv_cell = (float*) &scell[9];
+
 	int molID = blockMolIDs[blockIdx.x];
 	int iatom = blockAtomIDs[blockIdx.x];
 	int nneighbours_i = nneighbours[molID][iatom];
@@ -457,6 +529,22 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 
 	for (int i = threadIdx.x; i < nRs3; i += blockDim.x) {
 		sRs3[i] = Rs3[i];
+	}
+
+	bool pbc = false;
+
+	if (cell.size(0) > 0) {
+
+		pbc = true;
+
+		if (threadIdx.x == 0 && threadIdx.y == 0) {
+			for (int i = 0; i < 3; i++) {
+				for (int j = 0; j < 3; j++) {
+					scell[i * 3 + j] = cell[molID][i][j];
+					sinv_cell[i * 3 + j] = inv_cell[molID][i][j];
+				}
+			}
+		}
 	}
 
 	__syncthreads();
@@ -489,6 +577,12 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 		drij[0] = ri[0] - rj[0];
 		drij[1] = ri[1] - rj[1];
 		drij[2] = ri[2] - rj[2];
+
+		if (pbc) {
+			get_pbc_drij(drij, scell, sinv_cell);
+		}
+
+		float drji[3] = { -drij[0], -drij[1], -drij[2] };
 
 		float rij2 = drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2];
 		float rij = sqrtf(rij2);
@@ -546,9 +640,15 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 			drik[1] = ri[1] - rk[1];
 			drik[2] = ri[2] - rk[2];
 
-			drjk[0] = rj[0] - rk[0];
-			drjk[1] = rj[1] - rk[1];
-			drjk[2] = rj[2] - rk[2];
+			if (pbc) {
+				get_pbc_drij(drik, scell, sinv_cell);
+			}
+			drjk[0] = drik[0] - drij[0];
+			drjk[1] = drik[1] - drij[1];
+			drjk[2] = drik[2] - drij[2];
+
+			float drki[3] = { -drik[0], -drik[1], -drik[2] };
+			float drkj[3] = { -drjk[0], -drjk[1], -drjk[2] };
 
 			float rik2 = drik[0] * drik[0] + drik[1] * drik[1] + drik[2] * drik[2];
 			float rik = sqrtf(rik2);
@@ -567,10 +667,16 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 			float invrjk2 = invrjk * invrjk;
 
 			float rcutik = get_cutoff(rik, rcut, 0.0, 0);
-			float angle = calc_angle(rj, ri, rk); // ji, ki
-			float cos_i = calc_cos_angle(rj, ri, rk); // ji, ki
-			float cos_k = calc_cos_angle(rj, rk, ri); // jk, ik
-			float cos_j = calc_cos_angle(ri, rj, rk); // ij, kj
+
+			//float angle = calc_angle(rj, ri, rk);
+			float angle = calc_angle_abcb(drji, drki);
+
+			//float cos_i = calc_cos_angle(rj, ri, rk); // ji, ki
+			float cos_i = calc_cos_angle_abcb(drji, drki); // ji, ki
+			//float cos_k = calc_cos_angle(rj, rk, ri); // jk, ik
+			float cos_k = calc_cos_angle_abcb(drjk, drik); // jk, ik
+			//float cos_j = calc_cos_angle(ri, rj, rk); // ij, kj
+			float cos_j = calc_cos_angle_abcb(drij, drkj); // ij, kj
 
 			float cos_angle = expf(-powf(M_PI, 2) * 0.5) * 2.0 * cosf(angle);
 			float sin_angle = expf(-powf(M_PI, 2) * 0.5) * 2.0 * sinf(angle);
@@ -595,9 +701,12 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 
 			}
 
-			float vi = dot(rj, ri, rk, ri);
-			float vj = dot(rk, rj, ri, rj);
-			float vk = dot(ri, rk, rj, rk);
+			//float vi = dot(rj, ri, rk, ri); // ji, ki
+			float vi = dot_abcd(drji, drki);
+			//float vj = dot(rk, rj, ri, rj); // kj, ij
+			float vj = dot_abcd(drkj, drij);
+			//float vk = dot(ri, rk, rj, rk); // ik, jk
+			float vk = dot_abcd(drik, drjk);
 
 			float dcos_angle = expf(-powf(M_PI, 2) * 0.5) * 2 * sinf(angle) / sqrt(max(1e-10, rij2 * rik2 - vi * vi));
 			float dsin_angle = -expf(-powf(M_PI, 2) * 0.5) * 2 * cosf(angle) / sqrt(max(1e-10, rij2 * rik2 - vi * vi));
@@ -608,35 +717,48 @@ __global__ void fchl19_representation_and_derivative_cuda(const torch::PackedTen
 
 			for (int x = 0; x < 3; x++) {
 
-				float a = rj[x];
-				float b = ri[x];
-				float c = rk[x];
+				float a = drji[x];
+				float b = 0.0;
+				float c = drki[x];
 
-				float d_radial_d_j = (b - a) * invrij;
-				float d_radial_d_k = (b - c) * invrik;
+				float d_radial_d_j = (b - a) * invrij; // drij
+
+				float d_radial_d_k = (b - c) * invrik;  // drik
+
 				float d_radial_d_i = -(d_radial_d_j + d_radial_d_k);
 
-				float d_angular_d_j = (c - b) + vi * ((b - a) * invrij2);
-				float d_angular_d_k = (a - b) + vi * ((b - c) * invrik2);
+				float d_angular_d_j = (c - b) + vi * ((b - a) * invrij2); // drki, drij
+
+				float d_angular_d_k = (a - b) + vi * ((b - c) * invrik2); // drji, drik
+
 				float d_angular_d_i = -(d_angular_d_j + d_angular_d_k);
 
-				float d_ijdecay = -M_PI * (b - a) * sinf(M_PI * rij * invcut) * 0.5 * invrij * invcut;
-				float d_ikdecay = -M_PI * (b - c) * sinf(M_PI * rik * invcut) * 0.5 * invrik * invcut;
+				float d_ijdecay = -M_PI * (b - a) * sinf(M_PI * rij * invcut) * 0.5 * invrij * invcut; // drij
 
-				float d_atm_ii = 2 * b - a - c - vi * ((b - a) * invrij2 + (b - c) * invrik2);
-				float d_atm_ij = c - a - vj * (b - a) * invrij2;
-				float d_atm_ik = a - c - vk * (b - c) * invrik2;
+				float d_ikdecay = -M_PI * (b - c) * sinf(M_PI * rik * invcut) * 0.5 * invrik * invcut; // drik
 
-				float d_atm_ji = c - b - vi * (a - b) * invrij2;
+				float d_atm_ii = 2 * b - a - c - vi * ((b - a) * invrij2 + (b - c) * invrik2); //- a - c = -drjk, drij, drik
+
+				float d_atm_ij = c - a - vj * (b - a) * invrij2;				//drkj, drij
+
+				float d_atm_ik = a - c - vk * (b - c) * invrik2;				//drjk, drik
+
+				float d_atm_ji = c - b - vi * (a - b) * invrij2;				//drki, drji
+
 				float d_atm_jj = 2 * a - b - c - vj * ((a - b) * invrij2 + (a - c) * invrjk2);
+
 				float d_atm_jk = b - c - vk * (a - c) * invrjk2;
 
 				float d_atm_ki = a - b - vi * (c - b) * invrik2;
+
 				float d_atm_kj = b - a - vj * (c - a) * invrjk2;
+
 				float d_atm_kk = 2 * c - a - b - vk * ((c - a) * invrjk2 + (c - b) * invrik2);
 
 				float d_atm_extra_i = ((a - b) * invrij2 + (c - b) * invrik2) * atm * three_body_decay / three_body_weight;
+
 				float d_atm_extra_j = ((b - a) * invrij2 + (c - a) * invrjk2) * atm * three_body_decay / three_body_weight;
+
 				float d_atm_extra_k = ((a - c) * invrjk2 + (b - c) * invrik2) * atm * three_body_decay / three_body_weight;
 
 				for (int l = 0; l < nRs3; l++) {
@@ -712,9 +834,14 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 	float *sRs2 = (float*) &sneighbours[max_neighbours];
 	float *sRs3 = (float*) &sRs2[nRs2];
 
+	float *scell = (float*) &sRs3[nRs3];
+	float *sinv_cell = (float*) &scell[9];
+
 	int molID = blockMolIDs[blockIdx.x];
 	int iatom = blockAtomIDs[blockIdx.x];
 	int nneighbours_i = nneighbours[molID][iatom];
+
+	bool pbc = false;
 
 	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
 
@@ -734,6 +861,22 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 
 	for (int i = threadIdx.x; i < nRs3; i += blockDim.x) {
 		sRs3[i] = Rs3[i];
+	}
+
+	__syncthreads();
+
+	if (cell.size(0) > 0) {
+
+		pbc = true;
+
+		if (threadIdx.x == 0 && threadIdx.y == 0) {
+			for (int i = 0; i < 3; i++) {
+				for (int j = 0; j < 3; j++) {
+					scell[i * 3 + j] = cell[molID][i][j];
+					sinv_cell[i * 3 + j] = inv_cell[molID][i][j];
+				}
+			}
+		}
 	}
 
 	__syncthreads();
@@ -766,6 +909,12 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 		drij[0] = ri[0] - rj[0];
 		drij[1] = ri[1] - rj[1];
 		drij[2] = ri[2] - rj[2];
+
+		if (pbc) {
+			get_pbc_drij(drij, scell, sinv_cell);
+		}
+
+		float drji[3] = { -drij[0], -drij[1], -drij[2] };
 
 		float rij2 = drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2];
 		float rij = sqrtf(rij2);
@@ -819,9 +968,13 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 			drik[1] = ri[1] - rk[1];
 			drik[2] = ri[2] - rk[2];
 
-			drjk[0] = rj[0] - rk[0];
-			drjk[1] = rj[1] - rk[1];
-			drjk[2] = rj[2] - rk[2];
+			if (pbc) {
+				get_pbc_drij(drik, scell, sinv_cell);
+			}
+
+			drjk[0] = drik[0] - drij[0];
+			drjk[1] = drik[1] - drij[1];
+			drjk[2] = drik[2] - drij[2];
 
 			float rik2 = drik[0] * drik[0] + drik[1] * drik[1] + drik[2] * drik[2];
 			float rik = sqrtf(rik2);
@@ -840,10 +993,19 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 			float invrjk2 = invrjk * invrjk;
 
 			float rcutik = get_cutoff(rik, rcut, 0.0, 0);
-			float angle = calc_angle(rj, ri, rk); // ji, ki
-			float cos_i = calc_cos_angle(rj, ri, rk); // ji, ki
-			float cos_k = calc_cos_angle(rj, rk, ri); // jk, ik
-			float cos_j = calc_cos_angle(ri, rj, rk); // ij, kj
+
+			float drki[3] = { -drik[0], -drik[1], -drik[2] };
+			float drkj[3] = { -drjk[0], -drjk[1], -drjk[2] };
+
+			//float angle = calc_angle(rj, ri, rk);
+			float angle = calc_angle_abcb(drji, drki);
+
+			//float cos_i = calc_cos_angle(rj, ri, rk); // ji, ki
+			float cos_i = calc_cos_angle_abcb(drji, drki); // ji, ki
+			//float cos_k = calc_cos_angle(rj, rk, ri); // jk, ik
+			float cos_k = calc_cos_angle_abcb(drjk, drik); // jk, ik
+			//float cos_j = calc_cos_angle(ri, rj, rk); // ij, kj
+			float cos_j = calc_cos_angle_abcb(drij, drkj); // ij, kj
 
 			float cos_angle = expf(-powf(M_PI, 2) * 0.5) * 2.0 * cosf(angle);
 			float sin_angle = expf(-powf(M_PI, 2) * 0.5) * 2.0 * sinf(angle);
@@ -857,9 +1019,12 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 
 			int s = nelements * nRs2 + nRs3 * 2 * (-(p * (p + 1)) / 2 + q + nelements * p);
 
-			float vi = dot(rj, ri, rk, ri);
-			float vj = dot(rk, rj, ri, rj);
-			float vk = dot(ri, rk, rj, rk);
+			//float vi = dot(rj, ri, rk, ri); // ji, ki
+			float vi = dot_abcd(drji, drki);
+			//float vj = dot(rk, rj, ri, rj); // kj, ij
+			float vj = dot_abcd(drkj, drij);
+			//float vk = dot(ri, rk, rj, rk); // ik, jk
+			float vk = dot_abcd(drik, drjk);
 
 			float dcos_angle = expf(-powf(M_PI, 2) * 0.5) * 2 * sinf(angle) / sqrt(max(1e-10, rij2 * rik2 - vi * vi));
 			float dsin_angle = -expf(-powf(M_PI, 2) * 0.5) * 2 * cosf(angle) / sqrt(max(1e-10, rij2 * rik2 - vi * vi));
@@ -870,35 +1035,48 @@ __global__ void fchl19_derivative_cuda(const torch::PackedTensorAccessor32<float
 
 			for (int x = 0; x < 3; x++) {
 
-				float a = rj[x];
-				float b = ri[x];
-				float c = rk[x];
+				float a = drji[x];
+				float b = 0.0;
+				float c = drki[x];
 
-				float d_radial_d_j = (b - a) * invrij;
-				float d_radial_d_k = (b - c) * invrik;
+				float d_radial_d_j = (b - a) * invrij; // drij
+
+				float d_radial_d_k = (b - c) * invrik;  // drik
+
 				float d_radial_d_i = -(d_radial_d_j + d_radial_d_k);
 
-				float d_angular_d_j = (c - b) + vi * ((b - a) * invrij2);
-				float d_angular_d_k = (a - b) + vi * ((b - c) * invrik2);
+				float d_angular_d_j = (c - b) + vi * ((b - a) * invrij2); // drki, drij
+
+				float d_angular_d_k = (a - b) + vi * ((b - c) * invrik2); // drji, drik
+
 				float d_angular_d_i = -(d_angular_d_j + d_angular_d_k);
 
-				float d_ijdecay = -M_PI * (b - a) * sinf(M_PI * rij * invcut) * 0.5 * invrij * invcut;
-				float d_ikdecay = -M_PI * (b - c) * sinf(M_PI * rik * invcut) * 0.5 * invrik * invcut;
+				float d_ijdecay = -M_PI * (b - a) * sinf(M_PI * rij * invcut) * 0.5 * invrij * invcut; // drij
 
-				float d_atm_ii = 2 * b - a - c - vi * ((b - a) * invrij2 + (b - c) * invrik2);
-				float d_atm_ij = c - a - vj * (b - a) * invrij2;
-				float d_atm_ik = a - c - vk * (b - c) * invrik2;
+				float d_ikdecay = -M_PI * (b - c) * sinf(M_PI * rik * invcut) * 0.5 * invrik * invcut; // drik
 
-				float d_atm_ji = c - b - vi * (a - b) * invrij2;
+				float d_atm_ii = 2 * b - a - c - vi * ((b - a) * invrij2 + (b - c) * invrik2); //- a - c = -drjk, drij, drik
+
+				float d_atm_ij = c - a - vj * (b - a) * invrij2;				//drkj, drij
+
+				float d_atm_ik = a - c - vk * (b - c) * invrik2;				//drjk, drik
+
+				float d_atm_ji = c - b - vi * (a - b) * invrij2;				//drki, drji
+
 				float d_atm_jj = 2 * a - b - c - vj * ((a - b) * invrij2 + (a - c) * invrjk2);
+
 				float d_atm_jk = b - c - vk * (a - c) * invrjk2;
 
 				float d_atm_ki = a - b - vi * (c - b) * invrik2;
+
 				float d_atm_kj = b - a - vj * (c - a) * invrjk2;
+
 				float d_atm_kk = 2 * c - a - b - vk * ((c - a) * invrjk2 + (c - b) * invrik2);
 
 				float d_atm_extra_i = ((a - b) * invrij2 + (c - b) * invrik2) * atm * three_body_decay / three_body_weight;
+
 				float d_atm_extra_j = ((b - a) * invrij2 + (c - a) * invrjk2) * atm * three_body_decay / three_body_weight;
+
 				float d_atm_extra_k = ((a - c) * invrjk2 + (b - c) * invrik2) * atm * three_body_decay / three_body_weight;
 
 				for (int l = 0; l < nRs3; l++) {
@@ -975,7 +1153,10 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 	float *sRs2 = (float*) &sneighbours[max_neighbours];
 	float *sRs3 = (float*) &sRs2[nRs2];
 
-	float *sgradx = (float*) &sRs3[nRs3];
+	float *scell = (float*) &sRs3[nRs3];
+	float *sinv_cell = (float*) &scell[9];
+
+	float *sgradx = (float*) &sinv_cell[9];
 	float *sgrady = (float*) &sgradx[max_neighbours];
 	float *sgradz = (float*) &sgrady[max_neighbours];
 
@@ -1018,6 +1199,24 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 
 	__syncthreads();
 
+	bool pbc = false;
+
+	if (cell.size(0) > 0) {
+
+		pbc = true;
+
+		if (threadIdx.x == 0 && threadIdx.y == 0) {
+			for (int i = 0; i < 3; i++) {
+				for (int j = 0; j < 3; j++) {
+					scell[i * 3 + j] = cell[molID][i][j];
+					sinv_cell[i * 3 + j] = inv_cell[molID][i][j];
+				}
+			}
+		}
+	}
+
+	__syncthreads();
+
 	float ri[3];
 	float rj[3];
 	float rk[3];
@@ -1049,6 +1248,12 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 		drij[0] = ri[0] - rj[0];
 		drij[1] = ri[1] - rj[1];
 		drij[2] = ri[2] - rj[2];
+
+		if (pbc) {
+			get_pbc_drij(drij, scell, sinv_cell);
+		}
+
+		float drji[3] = { -drij[0], -drij[1], -drij[2] };
 
 		float rij2 = drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2];
 		float rij = sqrtf(rij2);
@@ -1112,9 +1317,13 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 			drik[1] = ri[1] - rk[1];
 			drik[2] = ri[2] - rk[2];
 
-			drjk[0] = rj[0] - rk[0];
-			drjk[1] = rj[1] - rk[1];
-			drjk[2] = rj[2] - rk[2];
+			if (pbc) {
+				get_pbc_drij(drik, scell, sinv_cell);
+			}
+
+			drjk[0] = drik[0] - drij[0];
+			drjk[1] = drik[1] - drij[1];
+			drjk[2] = drik[2] - drij[2];
 
 			float rik2 = drik[0] * drik[0] + drik[1] * drik[1] + drik[2] * drik[2];
 			float rik = sqrtf(rik2);
@@ -1133,10 +1342,19 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 			float invrjk2 = invrjk * invrjk;
 
 			float rcutik = get_cutoff(rik, rcut, 0.0, 0);
-			float angle = calc_angle(rj, ri, rk); // ji, ki
-			float cos_i = calc_cos_angle(rj, ri, rk); // ji, ki
-			float cos_k = calc_cos_angle(rj, rk, ri); // jk, ik
-			float cos_j = calc_cos_angle(ri, rj, rk); // ij, kj
+
+			float drki[3] = { -drik[0], -drik[1], -drik[2] };
+			float drkj[3] = { -drjk[0], -drjk[1], -drjk[2] };
+
+			//float angle = calc_angle(rj, ri, rk);
+			float angle = calc_angle_abcb(drji, drki);
+
+			//float cos_i = calc_cos_angle(rj, ri, rk); // ji, ki
+			float cos_i = calc_cos_angle_abcb(drji, drki); // ji, ki
+			//float cos_k = calc_cos_angle(rj, rk, ri); // jk, ik
+			float cos_k = calc_cos_angle_abcb(drjk, drik); // jk, ik
+			//float cos_j = calc_cos_angle(ri, rj, rk); // ij, kj
+			float cos_j = calc_cos_angle_abcb(drij, drkj); // ij, kj
 
 			float cos_angle = zeta_factor * 2.0 * cosf(angle);
 			float sin_angle = zeta_factor * 2.0 * sinf(angle);
@@ -1150,9 +1368,12 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 
 			int s = nelements * nRs2 + nRs3 * 2 * (-(p * (p + 1)) / 2 + q + nelements * p);
 
-			float vi = dot(rj, ri, rk, ri);
-			float vj = dot(rk, rj, ri, rj);
-			float vk = dot(ri, rk, rj, rk);
+			//float vi = dot(rj, ri, rk, ri); // ji, ki
+			float vi = dot_abcd(drji, drki);
+			//float vj = dot(rk, rj, ri, rj); // kj, ij
+			float vj = dot_abcd(drkj, drij);
+			//float vk = dot(ri, rk, rj, rk); // ik, jk
+			float vk = dot_abcd(drik, drjk);
 
 			float dcos_angle = zeta_factor * 2.0 * sinf(angle) / sqrt(max(1e-10, rij2 * rik2 - vi * vi));
 			float dsin_angle = -zeta_factor * 2.0 * cosf(angle) / sqrt(max(1e-10, rij2 * rik2 - vi * vi));
@@ -1193,9 +1414,9 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 
 			for (int x = 0; x < 3; x++) {
 
-				float a = rj[x];
-				float b = ri[x];
-				float c = rk[x];
+				float a = drji[x];
+				float b = 0.0;
+				float c = drki[x];
 
 				d_radial_d_j[x] = (b - a) * invrij;
 				d_radial_d_k[x] = (b - c) * invrik;
@@ -1296,7 +1517,7 @@ void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3,
 		float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output) {
 
-	const int nthreadsx = 64;
+	const int nthreadsx = 32;
 	const int nthreadsy = 1;
 
 	int nRs2 = Rs2.size(0);
@@ -1312,7 +1533,7 @@ void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor sp
 
 	dim3 grid(nthreadsx, nthreadsy);
 
-	int shared_mem_size = nRs2 + nRs3 + 4 * max_neighbours; //+ repsize;
+	int shared_mem_size = nRs2 + nRs3 + 4 * max_neighbours + 18; //+ repsize;
 
 	fchl19_representation_cuda<<<blocks, grid, shared_mem_size * sizeof(float)>>>(
 			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
@@ -1430,7 +1651,7 @@ void FCHLRepresentationAndDerivativeCuda(torch::Tensor coordinates, torch::Tenso
 	const int currBatch = blockAtomIDs.size(0);
 	const int max_neighbours = nneighbours.max().item<int>();
 
-	int shared_mem_size = nRs2 + nRs3 + 5 * max_neighbours;
+	int shared_mem_size = nRs2 + nRs3 + 5 * max_neighbours + 18;
 
 	fchl19_representation_and_derivative_cuda<<<currBatch, nthreads, shared_mem_size * sizeof(float)>>>(
 			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),

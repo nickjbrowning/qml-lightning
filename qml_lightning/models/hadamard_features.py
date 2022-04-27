@@ -111,11 +111,11 @@ class HadamardFeaturesModel(BaseKernel):
                 
         return feature_derivative
     
-    def SGD(self, X, Z, E, cells=None, lr=0.01, niter=100000):
+    def SGD(self, X, Z, E, cells=None, inv_cells=None, lr=0.01, niter=100000):
 
         coeff_normalisation = np.sqrt(self.npcas) / self.sigma
    
-        data = self.format_data(X, Z, E=E, cells=cells)
+        data = self.format_data(X, Z, E=E, cells=cells, inv_cells=inv_cells)
         
         coordinates = data['coordinates']
         charges = data['charges']
@@ -123,9 +123,10 @@ class HadamardFeaturesModel(BaseKernel):
         molIDs = data['molIDs']
         natom_counts = data['natom_counts']
         zcells = data['cells']
+        zinv_cells = data['inv_cells']
         energies = data['energies']
         
-        torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
+        torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, zinv_cells)
         
         permutation = torch.randperm(coordinates.shape[0])
         
@@ -162,7 +163,7 @@ class HadamardFeaturesModel(BaseKernel):
             print ("iteration: ", i, torch.mean(torch.abs(batch_predictions - energies[indices].float())))
             print ("alpha:", self.alpha)
     
-    def predict(self, X, Z, max_natoms, cells=None, forces=True, print_info=True, use_backward=True, profiler=False):
+    def predict(self, X, Z, max_natoms, cells=None, inv_cells=None, forces=True, print_info=True, use_backward=True, profiler=False):
 
         if (not use_backward):
             return self.predict_cuda(X, Z, max_natoms, cells, forces, print_info)
@@ -185,14 +186,15 @@ class HadamardFeaturesModel(BaseKernel):
                 
                 coordinates = X[i:i + self.nbatch_test]
                 charges = Z[i:i + self.nbatch_test]
-                
-                zbatch = len(coordinates)
-                
+
                 if (cells is not None):
                     zcells = cells[i:i + self.nbatch_test]
-                else: zcells = None
+                    z_invcells = inv_cells[i:i + self.nbatch_test]
+                else: 
+                    zcells = None 
+                    z_invcells = None
                     
-                data = self.format_data(coordinates, charges, cells=zcells)
+                data = self.format_data(coordinates, charges, cells=zcells, inv_cells=z_invcells)
                 
                 coordinates = data['coordinates']
                 charges = data['charges']
@@ -200,8 +202,9 @@ class HadamardFeaturesModel(BaseKernel):
                 molIDs = data['molIDs']
                 natom_counts = data['natom_counts']
                 zcells = data['cells']
-                
-                result = self.predict_opt(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, forces=forces, print_info=False, profiler=False)
+                z_invcells = data['inv_cells']
+
+                result = self.predict_opt(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, z_invcells, forces=forces, print_info=False, profiler=False)
                 
                 if (forces):
                     predict_energies[i:i + self.nbatch_test] = result[0]
@@ -218,7 +221,6 @@ class HadamardFeaturesModel(BaseKernel):
         
         if (profiler):
             print(prof.key_averages(group_by_stack_n=30).table(sort_by='self_cuda_time_total', row_limit=30))
-            # print(prof.key_averages().table(sort_by="self_cuda_time_total"))
             
         if (print_info):
             print("prediction for", len(X), "molecules time: ", start.elapsed_time(end), "ms")
@@ -228,12 +230,13 @@ class HadamardFeaturesModel(BaseKernel):
         else:
             return predict_energies
         
-    def predict_opt(self, coordinates, charges, atomIDs, molIDs, natom_counts, zcells,
+    def predict_opt(self, coordinates, charges, atomIDs, molIDs, natom_counts, cells=torch.empty(0, 3, 3, device='cuda'), inv_cells=torch.empty(0, 3, 3, device='cuda'),
                     forces=True, print_info=True, profiler=False):
         
         with torch.autograd.profiler.profile(enabled=profiler, use_cuda=True, with_stack=True) as prof:
             
             start = torch.cuda.Event(enable_timing=True)
+            start1 = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
         
             start.record()
@@ -247,9 +250,11 @@ class HadamardFeaturesModel(BaseKernel):
             if (forces):
                 coordinates.requires_grad = True
       
-            torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, zcells)
+            torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, cells, inv_cells)
     
             Ztest = torch.zeros(coordinates.shape[0], self.nfeatures(), device=torch.device('cuda'), dtype=torch.float32)
+
+            start1.record()
             
             for e in self.elements:
                  
@@ -276,7 +281,7 @@ class HadamardFeaturesModel(BaseKernel):
             
             end.record()
             torch.cuda.synchronize()
-
+            
         # if (profiler):
             # <FunctionEventAvg key=cudaEventCreateWithFlags self_cpu_time=6.000us cpu_time=1.500us  self_cuda_time=0.000us cuda_time=0.000us input_shapes= cpu_memory_usage=0 cuda_memory_usage=0>
             # print(prof.key_averages()[0])
@@ -292,7 +297,7 @@ class HadamardFeaturesModel(BaseKernel):
             result = (total_energies,)
     
         if (profiler):
-            result = result + (prof.key_averages(),)
+            result = result + (prof,)
             
         return result
 
@@ -325,8 +330,6 @@ class HadamardFeaturesModel(BaseKernel):
     def load_model(self, file_name="model"):
         
         data = np.load(file_name  if ".npy" in file_name else file_name + ".npy", allow_pickle=True)[()]
-        
-        # print (data)
         
         self.elements = data['elements']
         self.species = torch.from_numpy(self.elements).float().cuda()

@@ -15,11 +15,11 @@ __status__ = "Alpha"
 __description__ = "GPU-Accelerated Kernel Methods for Quantum Machine Learning"
 __url__ = "TODO"
 
-# optimisation_level_host = '-g'
-# optimisation_level_device = '-G'
+# optimisation_level_host = ['-g', '-rdynamic']
+# optimisation_level_device = ['-G', '-lineinfo']
 
-optimisation_level_host = '-O2'
-optimisation_level_device = '-O2'
+optimisation_level_host = ['-O2']
+optimisation_level_device = ['-O2']
 
 
 def readme():
@@ -39,56 +39,56 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'qml_lightning/cuda/gto_cuda.cpp',
             'qml_lightning/cuda/gto_cuda_kernel.cu'
         ],
-         extra_compile_args={'cxx': [optimisation_level_host],
-                            'nvcc': [optimisation_level_device]})
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
     
     fchl_extension = CUDAExtension(
         '.cuda.fchl_gpu', [
             'qml_lightning/cuda/fchl_cuda.cpp',
             'qml_lightning/cuda/fchl_cuda_kernel.cu'
         ],
-         extra_compile_args={'cxx': [optimisation_level_host],
-                            'nvcc': [optimisation_level_device]})
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
     
     hd_extension = CUDAExtension(
         '.cuda.sorf_gpu', [
             'qml_lightning/cuda/hadamard_cuda.cpp',
             'qml_lightning/cuda/hadamard_kernel.cu'
         ],
-         extra_compile_args={'cxx': [optimisation_level_host],
-                            'nvcc': [optimisation_level_device]})
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
     
     rff_extension = CUDAExtension(
         '.cuda.rff_gpu', [
             'qml_lightning/cuda/random_features.cpp',
             'qml_lightning/cuda/random_features_kernel.cu'
         ],
-        extra_compile_args={'cxx': [optimisation_level_host],
-                            'nvcc': [optimisation_level_device]})
+        extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
     
     pairlist_extension = CUDAExtension(
         '.cuda.pairlist_gpu', [
             'qml_lightning/cuda/pairlist_cuda.cpp',
             'qml_lightning/cuda/pairlist_kernel.cu'
         ],
-        extra_compile_args={'cxx': [optimisation_level_host],
-                            'nvcc': [optimisation_level_device]})
+        extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
     
     operator_extension = CUDAExtension(
         '.cuda.operator_gpu', [
             'qml_lightning/cuda/operator_cuda.cpp',
             'qml_lightning/cuda/operator_kernel.cu'
         ],
-         extra_compile_args={'cxx': [optimisation_level_host],
-                            'nvcc': [optimisation_level_device]})
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
     
     utils_extension = CUDAExtension(
         '.cuda.utils_gpu', [
             'qml_lightning/cuda/utils_cuda.cpp',
             'qml_lightning/cuda/utils_kernel.cu'
         ],
-         extra_compile_args={'cxx': [optimisation_level_host],
-                            'nvcc': [optimisation_level_device]})
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
     
     ext_modules.append(gto_extension)
     ext_modules.append(hd_extension)
