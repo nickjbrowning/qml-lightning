@@ -24,13 +24,13 @@ cd to the directory containing setup.py and type
 python3 setup.py build
 ```
 
-if you've got multiple versions of CUDA, you may need to prepend this command to let nvcc know where to find the correct CUDA libraries, eg:
+if you've got multiple versions of CUDA, you may need to prepend the LDFLAGS variable to let nvcc know where to find the correct CUDA libraries, eg:
 
 ```bash
 LDFLAGS=-L/usr/local/cuda-11.4 python3 setup.py build
 ```
 
-The above may also apply if you're using an environment manager, e.g conda/miniconda. Once built, set `PYTHONPATH` to the following build directory, e.g in your `.bashrc` file:
+The above may also apply if you're using an environment manager, e.g conda/miniconda. Alternatively, you can make sure your LD_LIBRARY_PATH is set correctly. Once built, set `PYTHONPATH` to the following build directory, e.g in your `.bashrc` file:
 
 ```bash
 export PYTHONPATH=/path/to/qml_lightning/build/lib.XXX:$PYTHONPATH
