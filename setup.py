@@ -74,14 +74,6 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
         extra_compile_args={'cxx': optimisation_level_host,
                             'nvcc': optimisation_level_device})
     
-    operator_extension = CUDAExtension(
-        '.cuda.operator_gpu', [
-            'qml_lightning/cuda/operator_cuda.cpp',
-            'qml_lightning/cuda/operator_kernel.cu'
-        ],
-         extra_compile_args={'cxx': optimisation_level_host,
-                            'nvcc': optimisation_level_device})
-    
     utils_extension = CUDAExtension(
         '.cuda.utils_gpu', [
             'qml_lightning/cuda/utils_cuda.cpp',
@@ -95,7 +87,6 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
     ext_modules.append(pairlist_extension)
     ext_modules.append(fchl_extension)
     ext_modules.append(rff_extension)
-    ext_modules.append(operator_extension)
     ext_modules.append(utils_extension)
     
 else:
@@ -108,7 +99,6 @@ setup(
               'qml_lightning.features',
               'qml_lightning.representations',
               'qml_lightning.models',
-              'qml_lightning.models.neural_net',
               'qml_lightning.utils'],
     version=__version__,
     author=__author__,
