@@ -2,7 +2,7 @@
 
 # QML-Lightning!
 
-GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning. 
+GPU-Accelerated Approximate Kernel Methods and Representations for Quantum Machine Learning. 
 
 
 # Requirements
