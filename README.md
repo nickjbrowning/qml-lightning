@@ -1,6 +1,6 @@
 <div style="text-align:center"><img src="./images/qml_lightning.png" alt="drawing" width="400"/></div>
 
-# QML-Lightning - Do Not Share Publically!
+# QML-Lightning!
 
 GPU-Accelerated Kernel Methods and Representations for Quantum Machine Learning. 
 
@@ -36,7 +36,7 @@ The above may also apply if you're using an environment manager, e.g conda/minic
 export PYTHONPATH=/path/to/qml_lightning/build/lib.XXX:$PYTHONPATH
 ```
 
-Now you should be good to go!
+Source your .bashrc and you should be good to go!
 
 # Use
 
