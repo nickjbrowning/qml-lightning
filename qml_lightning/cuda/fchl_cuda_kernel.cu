@@ -261,7 +261,7 @@ __device__ float calc_angle_abcb(float *ab, float *cb) {
 
 }
 
-__global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
+__global__ void fchl19_representation_cuda_old(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
 		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
 		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
 		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
@@ -414,6 +414,206 @@ __global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<f
 			if (pbc) {
 				get_pbc_drij(drik, scell, sinv_cell);
 			}
+			drjk[0] = drik[0] - drij[0];
+			drjk[1] = drik[1] - drij[1];
+			drjk[2] = drik[2] - drij[2];
+
+			drki[0] = -drik[0];
+			drki[1] = -drik[1];
+			drki[2] = -drik[2];
+
+			drkj[0] = -drjk[0];
+			drkj[1] = -drjk[1];
+			drkj[2] = -drjk[2];
+
+			float rik = sqrt(drik[0] * drik[0] + drik[1] * drik[1] + drik[2] * drik[2]);
+
+			if (rik > rcut) {
+				continue;
+			}
+
+			float rjk = sqrt(drjk[0] * drjk[0] + drjk[1] * drjk[1] + drjk[2] * drjk[2]);
+
+			float rcutik = get_cutoff(rik, rcut, 0.0, 0);
+
+			//__device__ float calc_cos_angle(float *a, float *b, float *c) {
+			//float v1norm = sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+			//float v2norm = sqrt((c[0] - b[0]) * (c[0] - b[0]) + (c[1] - b[1]) * (c[1] - b[1]) + (c[2] - b[2]) * (c[2] - b[2]));
+
+			//float angle = calc_angle(rj, ri, rk);
+			float angle = calc_angle_abcb(drji, drki);
+
+			//float cos_1 = calc_cos_angle(rj, ri, rk); // ji, ki
+			float cos_1 = calc_cos_angle_abcb(drji, drki); // ji, ki
+			//float cos_2 = calc_cos_angle(rj, rk, ri); // jk, ik
+			float cos_2 = calc_cos_angle_abcb(drjk, drik); // jk, ik
+			//float cos_3 = calc_cos_angle(ri, rj, rk); // ij, kj
+			float cos_3 = calc_cos_angle_abcb(drij, drkj); // ij, kj
+
+			float ksi3 = three_body_weight * (1.0 + 3 * cos_1 * cos_2 * cos_3) / powf(rij * rik * rjk, three_body_decay);
+
+			float cos_angle = expf_v * 2.0 * cosf(angle);
+			float sin_angle = expf_v * 2.0 * sinf(angle);
+
+			int p = min(jelement, kelement);
+			int q = max(jelement, kelement);
+
+			int s = nelements * nRs2 + nRs3 * 2 * (-(p * (p + 1)) / 2 + q + nelements * p);
+
+			for (int l = 0; l < nRs3; l++) {
+
+				int z = s + l * 2;
+
+				float radial = expf(-eta3 * powf(0.5 * (rij + rik) - sRs3[l], 2.0)) * rcutik * rcutij;
+
+				atomicAdd(&output[molID][iatom][z], radial * cos_angle * ksi3);
+				atomicAdd(&output[molID][iatom][z + 1], radial * sin_angle * ksi3);
+			}
+		}
+	}
+}
+
+__global__ void fchl19_representation_cuda(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
+		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
+		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> cell,
+		const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> inv_cell,
+		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockAtomIDs, // blockIdx -> atom idx
+		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> blockMolIDs, // blockIdx -> molecule jdx
+		const torch::PackedTensorAccessor32<int, 3, torch::RestrictPtrTraits> neighbourlist,
+		const torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> nneighbours, const int max_neighbours,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> Rs2,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight,
+		float three_body_decay, float rcut, torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output) {
+
+	extern __shared__ int s[];
+
+	int nRs2 = Rs2.size(0);
+	int nRs3 = Rs3.size(0);
+
+	int nelements = species.size(0);
+
+	float *scoords_x = (float*) &s;
+	float *scoords_y = (float*) &scoords_x[max_neighbours];
+	float *scoords_z = (float*) &scoords_y[max_neighbours];
+	int *selement_types = (int*) &scoords_z[max_neighbours];
+
+	float *sRs2 = (float*) &selement_types[max_neighbours];
+	float *sRs3 = (float*) &sRs2[nRs2];
+
+	float *scell = (float*) &sRs3[nRs3];
+	float *sinv_cell = (float*) &scell[9];
+
+	int molID = blockMolIDs[blockIdx.x];
+	int iatom = blockAtomIDs[blockIdx.x];
+
+	for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < nRs2; i += blockDim.x * blockDim.y) {
+		sRs2[i] = Rs2[i];
+	}
+	__syncthreads();
+
+	for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < nRs3; i += blockDim.x * blockDim.y) {
+		sRs3[i] = Rs3[i];
+	}
+
+	__syncthreads();
+
+	int nneighbours_i = nneighbours[molID][iatom];
+
+	for (int jatom = threadIdx.y * blockDim.x + threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x * blockDim.y) {
+
+		int j = neighbourlist[molID][iatom][jatom];
+
+		scoords_x[jatom] = coordinates[molID][j][0];
+		scoords_y[jatom] = coordinates[molID][j][1];
+		scoords_z[jatom] = coordinates[molID][j][2];
+		selement_types[jatom] = element_types[molID][j];
+
+	}
+
+	__syncthreads();
+
+	float ri[3];
+
+	float drij[3];
+	float drik[3];
+	float drjk[3];
+	float drji[3];
+	float drki[3];
+	float drkj[3];
+
+	bool pbc = false;
+
+	if (cell.size(0) > 0) {
+
+		pbc = true;
+
+		if (threadIdx.x == 0 && threadIdx.y == 0) {
+			for (int i = 0; i < 3; i++) {
+				for (int j = 0; j < 3; j++) {
+					scell[i * 3 + j] = cell[molID][i][j];
+					sinv_cell[i * 3 + j] = inv_cell[molID][i][j];
+				}
+			}
+		}
+	}
+	__syncthreads();
+
+	ri[0] = coordinates[molID][iatom][0];
+	ri[1] = coordinates[molID][iatom][1];
+	ri[2] = coordinates[molID][iatom][2];
+
+	float expf_v = expf(-powf(M_PI, 2) * 0.5);
+	float sqrt2pi = sqrtf(2.0 * M_PI);
+
+	for (int jatom = threadIdx.x; jatom < nneighbours_i; jatom += blockDim.x) {
+
+		int jelement = selement_types[jatom];
+
+		drij[0] = ri[0] - scoords_x[jatom];
+		drij[1] = ri[1] - scoords_y[jatom];
+		drij[2] = ri[2] - scoords_z[jatom];
+
+		if (pbc) {
+			get_pbc_drij(drij, scell, sinv_cell);
+		}
+
+		drji[0] = -drij[0];
+		drji[1] = -drij[1];
+		drji[2] = -drij[2];
+
+		float rij = sqrtf(drij[0] * drij[0] + drij[1] * drij[1] + drij[2] * drij[2]);
+
+		float scaling = 1.0 / powf(rij, two_body_decay);
+
+		float rcutij = get_cutoff(rij, rcut, 0.0, 0);
+
+		float mu = log(rij / sqrt(1.0 + eta2 / powf(rij, 2.0)));
+		float sigma = sqrtf(log(1.0 + eta2 / powf(rij, 2.0)));
+
+		float invsigma22 = 1.0 / (2.0 * powf(sigma, 2));
+
+		for (int z = threadIdx.y; z < nRs2; z += blockDim.y) {
+
+			float radial = 1.0 / (sigma * sqrt2pi * sRs2[z]) * expf(-powf(log(sRs2[z]) - mu, 2) * invsigma22) * scaling * rcutij;
+
+			atomicAdd(&output[molID][iatom][jelement * nRs2 + z], radial);
+
+		}
+
+		for (int katom = jatom + 1 + threadIdx.y; katom < nneighbours_i; katom += blockDim.y) {
+
+			int kelement = selement_types[katom];
+
+			drik[0] = ri[0] - scoords_x[katom];
+			drik[1] = ri[1] - scoords_y[katom];
+			drik[2] = ri[2] - scoords_z[katom];
+
+			if (pbc) {
+				get_pbc_drij(drik, scell, sinv_cell);
+			}
+
 			drjk[0] = drik[0] - drij[0];
 			drjk[1] = drik[1] - drij[1];
 			drjk[2] = drik[2] - drij[2];
@@ -1513,12 +1713,57 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 	}
 }
 
+void FCHLCuda_old(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
+		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
+		torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
+		torch::Tensor output) {
+
+	const int nthreadsx = 32;
+	const int nthreadsy = 1;
+
+	int nRs2 = Rs2.size(0);
+	int nRs3 = Rs3.size(0);
+	int nspecies = species.size(0);
+
+//int repsize = nspecies * nRs2 + (nspecies * (nspecies + 1)) * nRs3;
+
+	const int currBatch = blockAtomIDs.size(0);
+	const int max_neighbours = nneighbours.max().item<int>();
+
+	dim3 blocks(currBatch);
+
+	dim3 grid(nthreadsx, nthreadsy);
+
+	int shared_mem_size = nRs2 + nRs3 + 4 * max_neighbours + 18; //+ repsize;
+
+	fchl19_representation_cuda<<<blocks, grid, shared_mem_size * sizeof(float)>>>(
+			coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			element_types.packed_accessor32<int, 2, torch::RestrictPtrTraits>(),
+			cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			inv_cell.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			blockAtomIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			blockMolIDs.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			neighbourlist.packed_accessor32<int, 3, torch::RestrictPtrTraits>(),
+			nneighbours.packed_accessor32<int,2, torch::RestrictPtrTraits>(),
+			max_neighbours,
+			Rs2.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			Rs3.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			eta2, eta3, two_body_decay, three_body_weight, three_body_decay,rcut,
+
+			output.packed_accessor32<float, 3, torch::RestrictPtrTraits>());
+
+	cudaDeviceSynchronize();
+
+}
+
 void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell, torch::Tensor inv_cell,
 		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3,
 		float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output) {
 
-	const int nthreadsx = 32;
-	const int nthreadsy = 1;
+	const int nthreadsx = 16;
+	const int nthreadsy = 8;
 
 	int nRs2 = Rs2.size(0);
 	int nRs3 = Rs3.size(0);

@@ -36,7 +36,10 @@ class FCHLFunction(torch.autograd.Function):
         # print ("pairlist n_neighbours time: ", start.elapsed_time(end))
         
         max_neighbours = nneighbours.max().item()
-     
+        
+        # print ("max_neighbours", max_neighbours)
+        # print ("avg_neighbours", nneighbours.float().mean().int())
+        
         start.record()
         neighbourlist = pairlist_gpu.get_neighbour_list_gpu(X, atom_counts, max_neighbours, rcut,
                                                             cell, inv_cell)
@@ -186,7 +189,6 @@ class FCHLCuda(torch.nn.Module):
         end.record()
         torch.cuda.synchronize()
         
-        # print ("fchl time: ", start.elapsed_time(end))
         return output
     
     def get_representation_and_derivative(self, X:torch.Tensor, Z: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, atom_counts: torch.Tensor,

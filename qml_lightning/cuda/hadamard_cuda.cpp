@@ -14,6 +14,8 @@ void compute_molecular_featurization_derivative(torch::Tensor partial_feature_de
 void compute_partial_feature_derivatives(torch::Tensor sorf_matrix, torch::Tensor bias, torch::Tensor sin_coeffs);
 
 void hadamard_gpu(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
+void hadamard_gpu2(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms, const int nthreadsY);
+
 void hadamard_backwards_gpu(torch::Tensor input, torch::Tensor dmatrix, torch::Tensor output, float normalisation, const int ntransforms);
 
 void cos_features_gpu(torch::Tensor coeffs, torch::Tensor b, torch::Tensor batch_indexes, torch::Tensor output);
@@ -51,6 +53,20 @@ torch::Tensor hadamard_transform_gpu(torch::Tensor input, torch::Tensor dmatrix,
 	torch::Tensor output = torch::zeros( { input.size(0), dmatrix.size(1), input.size(1) }, options);
 
 	hadamard_gpu(input, dmatrix, output, normalisation, ntransforms);
+
+	return output;
+}
+
+torch::Tensor hadamard_transform_gpu2(torch::Tensor input, torch::Tensor dmatrix, float normalisation, const int ntransforms, const int nthreadsY) {
+
+	TORCH_CHECK(input.device().type() == torch::kCUDA, "input must be a CUDA tensor");
+	TORCH_CHECK(dmatrix.device().type() == torch::kCUDA, "dmatrix must be a CUDA tensor");
+
+	auto options = torch::TensorOptions().dtype(torch::kFloat32).layout(torch::kStrided).device(torch::kCUDA);
+
+	torch::Tensor output = torch::zeros( { input.size(0), dmatrix.size(1), input.size(1) }, options);
+
+	hadamard_gpu2(input, dmatrix, output, normalisation, ntransforms, nthreadsY);
 
 	return output;
 }
@@ -114,6 +130,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 	m.def("CosFeaturesCUDA", &CosFeaturesCUDA, "");
 	m.def("CosDerivativeFeaturesCUDA", &CosDerivativeFeaturesCUDA, "");
 	m.def("hadamard_transform_gpu", &hadamard_transform_gpu, "hadamard transform");
+	m.def("hadamard_transform_gpu2", &hadamard_transform_gpu2, "hadamard transform");
 
 	m.def("hadamard_transform_backwards_gpu", &hadamard_transform_backwards_gpu, "hadamard backwards transform");
 

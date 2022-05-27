@@ -291,13 +291,13 @@ class HadamardFeaturesModel(BaseKernel):
             print("prediction for", coordinates.shape[0], "molecules time: ", start.elapsed_time(end), "ms")
         
         if (forces):
-            result = (total_energies, forces_torch)
+            result = total_energies, forces_torch
 
         else:
-            result = (total_energies,)
+            result = total_energies
     
         if (profiler):
-            result = result + (prof,)
+            result = (result,) + (prof,)
             
         return result
 

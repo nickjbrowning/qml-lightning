@@ -37,6 +37,124 @@ class BaseKernel(torch.nn.Module):
     def calculate_features(self, rep, element, indexes, feature_matrix, grad=None, derivative_matrix=None):
         raise NotImplementedError("Abstract method only.")
     
+    def train_svd(self, X, Q, E=None, F=None, cells=None, inv_cells=None, print_info=True, cpu_solve=False, ntiles=1, use_specialized_matmul=False):
+        
+        if (self.reductors is None):
+            print("ERROR: Must call model.get_reductors() first to initialize the projection matrices.")
+            exit()
+            
+        if (E is None and F is None):
+            print("ERROR: must have either E, F or both as input to train().")
+            exit()
+        
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+   
+        start.record()
+        
+        data = self.format_data(X, Q, E=E, F=F, cells=cells, inv_cells=inv_cells)
+        
+        coordinates = data['coordinates']
+        charges = data['charges']
+        atomIDs = data['atomIDs']
+        molIDs = data['molIDs']
+        natom_counts = data['natom_counts']
+        zcells = data['cells']
+        zinv_cells = data['inv_cells']
+        
+        energies = data['energies']
+        forces = data['forces']
+        
+        if (E is not None and F is None):
+            targets = energies[:, None] 
+        elif (E is None and F is not None):
+            # zero out energy targets so it has the correct dimensions for matmul
+            targets = torch.cat((torch.zeros((coordinates.shape[0], 1), device=self.device), forces.flatten()[:, None]), dim=0)
+        else:
+            targets = torch.cat((energies[:, None], forces.flatten()[:, None]), dim=0)
+        
+        max_natoms = natom_counts.max().item()
+  
+        if (F is None):
+            gto = self.rep.get_representation(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, zinv_cells)
+        else:
+            gto, gto_derivative = self.rep.get_representation_and_derivative(coordinates, charges, atomIDs, molIDs,
+                                                                             natom_counts, zcells, zinv_cells)
+        
+        Ztrain = torch.zeros(coordinates.shape[0], self.nfeatures(), device=self.device, dtype=torch.float64)
+        
+        Gtrain_derivative = None
+        
+        if (F is not None):
+            Gtrain_derivative = torch.zeros(coordinates.shape[0], max_natoms, 3, self.nfeatures(), device=self.device, dtype=torch.float64)
+            
+        for e in self.elements:
+        
+            indexes = charges.int() == e
+            
+            batch_indexes = torch.where(indexes)[0].type(torch.int)
+            
+            sub = gto[indexes]
+            
+            if (sub.shape[0] == 0):
+                continue
+            
+            sub = project_representation(sub, self.reductors[e])
+ 
+            sub_grad = None
+            
+            if (F is not None):
+                sub_grad = gto_derivative[indexes]
+                sub_grad = project_derivative(sub_grad, self.reductors[e])
+ 
+            self.calculate_features(sub, e, batch_indexes, Ztrain, sub_grad, Gtrain_derivative)
+        
+        if (E is None):
+            Ztrain.fill_(0)  # hack to set all energy features to 0, such that they do not contribute to Z.T Z
+        
+        if (F is not None):
+            Gtrain_derivative = Gtrain_derivative.reshape(coordinates.shape[0] * max_natoms * 3, self.nfeatures())
+            
+            Ztrain = torch.cat((Ztrain, Gtrain_derivative), dim=0)
+        
+        print (Ztrain)
+        
+        end.record()
+        torch.cuda.synchronize()
+
+        print("Ztrain time: ", start.elapsed_time(end), "ms", Ztrain.shape)
+    
+        U, S, V = torch.svd(Ztrain)
+        
+        print (S)
+        
+        print (U.shape, S.shape, V.shape)
+        
+        U = U[:,:2000]
+        S = S[:2000]
+        V = V[:,:2000]
+        
+        print (targets.shape)
+        print (U.shape, S.shape, V.shape)
+        
+        S_ = torch.diag(1.0 / S)
+        alpha = torch.matmul(V, torch.matmul(S_, torch.matmul(U.T, targets)))
+        
+        print (alpha.shape)
+       
+        training_predictions = torch.matmul(Ztrain, alpha)
+        energy_predictions = training_predictions[:coordinates.shape[0]]
+        force_predictions = training_predictions[coordinates.shape[0]:]
+        
+        energy_truths = targets[:coordinates.shape[0]]
+        force_truths = targets[coordinates.shape[0]:]
+        
+        print ("Training energy MAE:", torch.mean(torch.abs(energy_predictions - energy_truths)))
+        print ("Training force MAE:", torch.mean(torch.abs(force_predictions - force_truths)))
+        
+        self.alpha = alpha
+        self.is_trained = True
+        
     def build_Z_components(self, X, Q, E=None, F=None, cells=None, inv_cells=None, print_info=True, cpu_solve=False, ntiles=1, use_specialized_matmul=False):
         
         '''
@@ -48,7 +166,7 @@ class BaseKernel(torch.nn.Module):
          
         print_info: Boolean defining whether or not to print timings + progress bar
         
-        returns: Z^TQ, ZY
+        returns: Z^TZ, ZY
         
         '''
         
@@ -544,8 +662,6 @@ class BaseKernel(torch.nn.Module):
             
             index_set[e] = idxs
             
-            if (print_info):
-                print ("element:", e, "index_set:", index_set[e])
             subsample_indexes = np.random.choice(index_set[e], size=np.min([len(index_set[e]), 1024]))
             
             subsample_coordinates = [X[i] for i in subsample_indexes]
@@ -597,9 +713,6 @@ class BaseKernel(torch.nn.Module):
             
             mat = torch.cat(inputs)
             
-            if (print_info):
-                print ("SVD Matrix Size: ", mat.shape)
-            
             eigvecs, eigvals, vh = torch.linalg.svd(mat.T, full_matrices=False)
         
             cev = 100 - (torch.sum(eigvals) - torch.sum(eigvals[:npcas])) / torch.sum(eigvals) * 100
@@ -613,7 +726,11 @@ class BaseKernel(torch.nn.Module):
             torch.cuda.synchronize()
             
             if (print_info):
-                print (f"{size_from} -> {size_to}  Cumulative Explained Feature Variance = {cev:6.2f} %%")
+                print (f"element {e}: {size_from} -> {size_to}  Cumulative Explained Feature Variance = {cev:6.2f} %")
+                
+            if (reductor.shape[1] < npcas):
+                print (f"ERROR - not enough atomic environments in input dataset for element {e}. Either increase npca_choice or provide more structures.")
+                exit()
             
             self.reductors[e] = reductor
     
@@ -631,6 +748,9 @@ class BaseKernel(torch.nn.Module):
     
     def calculate_self_energy(self, Q, E):
         
+        '''
+        computes the per-atom contribution from Q towards the property E
+        '''
         nmol = len(Q)
         
         natom_counts = torch.zeros(nmol, dtype=torch.int)
