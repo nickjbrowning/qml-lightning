@@ -87,7 +87,7 @@ if __name__ == "__main__":
                  three_body_weight=args.three_body_weight, three_body_decay=args.three_body_decay)
     
     model = HadamardFeaturesModel(rep, elements=unique_z, sigma=sigma, llambda=llambda,
-                                nstacks=nstacks, ntransforms=ntransforms, npcas=npcas,
+                                nstacks=nstacks, npcas=npcas,
                                 nbatch_train=nbatch_train, nbatch_test=nbatch_test)
     
     print ("Calculating projection matrices...")
