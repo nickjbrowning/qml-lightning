@@ -109,3 +109,31 @@ where self_energy is a torch Tensor that has shape (max(elements) + 1). If these
 model.set_subtract_self_energies(True)
 model.calculate_self_energy(train_charges, train_energies)
 ````
+
+# Citation
+
+Please cite the following archive if you use or derive from this work.
+
+```
+https://arxiv.org/abs/2206.01580
+```
+
+```
+@misc{https://doi.org/10.48550/arxiv.2206.01580,
+  doi = {10.48550/ARXIV.2206.01580},
+  
+  url = {https://arxiv.org/abs/2206.01580},
+  
+  author = {Browning, Nicholas J. and Faber, Felix A. and von Lilienfeld, O. Anatole},
+  
+  keywords = {Chemical Physics (physics.chem-ph), FOS: Physical sciences, FOS: Physical sciences},
+  
+  title = {GPU-Accelerated Approximate Kernel Method for Quantum Machine Learning},
+  
+  publisher = {arXiv},
+  
+  year = {2022},
+  
+  copyright = {Creative Commons Attribution 4.0 International}
+}
+```
