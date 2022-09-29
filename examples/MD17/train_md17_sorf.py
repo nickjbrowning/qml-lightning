@@ -11,6 +11,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument("-ntrain", type=int, default=1000)
+    parser.add_argument("-ntest", type=int, default=10000)
     parser.add_argument("-nbatch_train", type=int, default=64)
     parser.add_argument("-nbatch_test", type=int, default=256)
     
@@ -18,17 +19,20 @@ if __name__ == "__main__":
     parser.add_argument("-sigma", type=float, default=2.0)
     parser.add_argument("-llambda", type=float, default=1e-5)
     parser.add_argument("-npcas", type=int, default=128)
-    parser.add_argument("-ntransforms", type=int, default=2)
+    parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nstacks", type=int, default=128)
     
     parser.add_argument('-rcut', type=float, default=6.0)
     parser.add_argument("-nRs2", type=int, default=24)
-    parser.add_argument("-nRs3", type=int, default=20)
-    parser.add_argument("-eta2", type=float, default=0.32)
-    parser.add_argument("-eta3", type=float, default=2.7)
-    parser.add_argument("-two_body_decay", type=float, default=1.8)
-    parser.add_argument("-three_body_decay", type=float, default=0.57)
-    parser.add_argument("-three_body_weight", type=float, default=13.4)
+    parser.add_argument("-nRs3", type=int, default=22)
+    parser.add_argument("-eta2", type=float, default=0.28)
+    parser.add_argument("-eta3", type=float, default=3.2)
+    parser.add_argument("-two_body_decay", type=float, default=2.3)
+    parser.add_argument("-three_body_decay", type=float, default=0.65)
+    parser.add_argument("-three_body_weight", type=float, default=18.8)
+    
+    parser.add_argument("-hyperparam_opt", type=int, choices=[0, 1], default=0)
+    parser.add_argument("-forces", type=int, choices=[0, 1], default=1)
     
     parser.add_argument("-train_ids", type=str, default="splits/aspirin_train_ids.npy")
     parser.add_argument("-test_ids", type=str, default="splits/aspirin_test_ids.npy")
@@ -40,6 +44,8 @@ if __name__ == "__main__":
     print (args)
 
     ntrain = args.ntrain
+    ntest = args.ntest
+    
     nbatch_train = args.nbatch_train
     nbatch_test = args.nbatch_test
     
@@ -68,15 +74,21 @@ if __name__ == "__main__":
     
     data = np.load(args.path)
     
-    coords = data['R']
-    nuclear_charges = data['z']
-    energies = data['E'].flatten()
-    forces = data['F']
+    if ('R' in data.keys()):
+        coords = data['R']
+        nuclear_charges = data['z']
+        energies = data['E'].flatten()
+        forces = data['F']
+    else:
+        coords = data['coords']
+        nuclear_charges = data['nuclear_charges']
+        energies = data['energies'].flatten()
+        forces = data['forces']
 
     nuclear_charges = np.repeat(nuclear_charges[np.newaxis,:], coords.shape[0], axis=0)
     
     train_IDs = np.fromfile(args.train_ids, dtype=int)
-    test_indexes = np.fromfile(args.test_ids, dtype=int)
+    test_indexes = np.fromfile(args.test_ids, dtype=int)[:args.ntest]
     
     unique_z = np.unique(np.concatenate(nuclear_charges)).astype(int)
 
@@ -94,7 +106,7 @@ if __name__ == "__main__":
     test_energies = [energies[i] for i in test_indexes]
     test_forces = [forces[i] for i in test_indexes]
     
-    rep = FCHLCuda(species=unique_z, high_cutoff=rcut, nRs2=nRs2, nRs3=nRs3, eta2=eta2, eta3=eta3,
+    rep = FCHLCuda(species=unique_z, rcut=rcut, nRs2=nRs2, nRs3=nRs3, eta2=eta2, eta3=eta3,
                    two_body_decay=two_body_decay, three_body_decay=three_body_decay, three_body_weight=three_body_weight)
     
     model = HadamardFeaturesModel(rep, elements=unique_z, sigma=sigma, llambda=llambda,
@@ -107,17 +119,59 @@ if __name__ == "__main__":
     print ("Subtracting linear atomic property contributions ...")
     model.set_subtract_self_energies(True)
     model.calculate_self_energy(train_charges, train_energies)
-   
-    model.train(train_coordinates, train_charges, train_energies, train_forces)
     
-    data = model.format_data(test_coordinates, test_charges, test_energies, test_forces)
+    if (args.hyperparam_opt):
+        model.hyperparam_opt_nested_cv(train_coordinates, train_charges, train_energies, F=train_forces if args.forces else None)
+    
+    model.train(train_coordinates, train_charges, train_energies, train_forces if args.forces else None)
+    
+    data = model.format_data(test_coordinates, test_charges, test_energies, test_forces if args.forces else None)
 
     test_energies = data['energies']
-    test_forces = data['forces']
     max_natoms = data['natom_counts'].max().item()
-
-    energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True, use_backward=True)
-
-    print("Energy MAE /w backwards:", torch.mean(torch.abs(energy_predictions - test_energies)))
-    print("Force MAE /w backwards:", torch.mean(torch.abs(force_predictions - test_forces)))
     
+    from time import time
+    
+    if (args.forces):
+        test_forces = data['forces']
+        energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
+    else:
+        energy_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=False)
+    
+    nrepeats = 100
+    
+    tot_time = 0.0
+    for i in range(nrepeats):
+        start = time()
+    
+        energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True, print_info=False)
+        end = time()
+    
+        tot_time += end - start
+    
+    print (tot_time / nrepeats)
+        
+    # total = 0.0
+    # for i in range (50):
+    #     if (args.forces):
+    #         test_forces = data['forces']
+    #         start = time()
+    #         energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
+    #         end = time()
+    #
+    #         total += end - start
+    #     else:
+    #         start = time()
+    #         energy_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=False)
+    #         end = time()
+    #
+    #         total += end - start
+    #
+    # print (total / 50)
+            
+    print("Energy MAE /w backwards:", torch.mean(torch.abs(energy_predictions - test_energies)))
+    
+    if (args.forces):
+        print("Force MAE /w backwards:", torch.mean(torch.abs(force_predictions - test_forces)))
+    
+    model.save_jit_model()

@@ -1713,6 +1713,49 @@ __global__ void fchl19_backwards_cuda(const torch::PackedTensorAccessor32<float,
 	}
 }
 
+__global__
+void get_element_types_kernel(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
+		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
+		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> natom_counts,
+		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
+		torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types) {
+
+	int natoms = natom_counts[blockIdx.x];
+	int nspecies = species.size(0);
+
+	for (int iatom = threadIdx.x; iatom < natoms; iatom += blockDim.x) {
+
+		if (iatom < natoms) {
+
+			int qi = charges[blockIdx.x][iatom];
+
+			int index = -1;
+			for (int j = 0; j < nspecies; j++) {
+				if (qi == species[j]) {
+					index = j;
+				}
+			}
+
+			element_types[blockIdx.x][iatom] = index;
+		}
+	}
+}
+
+void getElementTypesCUDA(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natom_counts, torch::Tensor species, torch::Tensor element_types) {
+
+	int nbatch = coordinates.size(0);
+	const int nthreads = 32;
+
+	get_element_types_kernel<<<nbatch, nthreads>>>(coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+			natom_counts.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
+			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+			element_types.packed_accessor32<int, 2, torch::RestrictPtrTraits>());
+
+	cudaDeviceSynchronize();
+
+}
+
 void FCHLCuda_old(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
 		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
 		torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,

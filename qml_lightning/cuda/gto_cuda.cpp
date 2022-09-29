@@ -17,33 +17,6 @@ void EGTODerivativeCuda(torch::Tensor coordinates, torch::Tensor charges, torch:
 		int lmax, float rcut, float rswitch, torch::Tensor cell, torch::Tensor inv_cell, int cutoff_type, int distribution_type, torch::Tensor gto_output,
 		torch::Tensor gto_output_derivative);
 
-torch::Tensor get_element_types_gpu(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natom_counts, torch::Tensor species) {
-
-	TORCH_CHECK(coordinates.device().type() == torch::kCUDA, "coordinates must be a CUDA tensor");
-
-	TORCH_CHECK(charges.device().type() == torch::kCUDA, "charges must be a CUDA tensor");
-
-	TORCH_CHECK(species.device().type() == torch::kCUDA, "species must be a CUDA tensor");
-
-	if (coordinates.dim() == 2) { // pad a dimension so elementalGTOGPUSharedMem still works
-
-		coordinates = coordinates.unsqueeze(0);
-		charges = charges.unsqueeze(0);
-
-	}
-
-	int nbatch = coordinates.size(0);
-	int natoms = coordinates.size(1);
-
-	auto options = torch::TensorOptions().dtype(torch::kInt32).layout(torch::kStrided).device(torch::kCUDA);
-
-	torch::Tensor element_types = torch::zeros( { nbatch, natoms }, options);
-
-	getElementTypesCuda(coordinates, charges, natom_counts, species, element_types);
-
-	return element_types;
-}
-
 std::vector<torch::Tensor> get_egto(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types,
 		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist,
 		torch::Tensor gto_components, torch::Tensor orbital_weights, torch::Tensor gto_powers, torch::Tensor gridpoints, torch::Tensor lchannel_weights,

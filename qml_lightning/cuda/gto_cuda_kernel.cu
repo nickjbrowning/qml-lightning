@@ -812,54 +812,6 @@ void egto_atomic_representation_derivative_cuda(const torch::PackedTensorAccesso
 	}
 }
 
-__global__
-void get_element_types_kernel(const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> coordinates,
-		const torch::PackedTensorAccessor32<float, 2, torch::RestrictPtrTraits> charges,
-		const torch::PackedTensorAccessor32<int, 1, torch::RestrictPtrTraits> natom_counts,
-		const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> species,
-		torch::PackedTensorAccessor32<int, 2, torch::RestrictPtrTraits> element_types) {
-
-	int natoms = natom_counts[blockIdx.x];
-	int nspecies = species.size(0);
-
-	for (int iatom = threadIdx.x; iatom < natoms; iatom += blockDim.x) {
-
-		if (iatom < natoms) {
-
-			int qi = charges[blockIdx.x][iatom];
-
-			int index = -1;
-			for (int j = 0; j < nspecies; j++) {
-				if (qi == species[j]) {
-					index = j;
-				}
-			}
-
-			element_types[blockIdx.x][iatom] = index;
-		}
-	}
-
-//	for (int iatom = threadIdx.x; iatom < natoms; iatom += blockDim.x) {
-//		printf("blockDim: %d, natoms: %d, block: %d, thread %d, element_type: %d\n", blockDim.x, natoms, blockIdx.x, threadIdx.x,
-//				element_types[blockIdx.x][iatom]);
-//	}
-}
-
-void getElementTypesCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natom_counts, torch::Tensor species, torch::Tensor element_types) {
-
-	int nbatch = coordinates.size(0);
-	const int nthreads = 32;
-
-	get_element_types_kernel<<<nbatch, nthreads>>>(coordinates.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-			charges.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
-			natom_counts.packed_accessor32<int, 1, torch::RestrictPtrTraits>(),
-			species.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
-			element_types.packed_accessor32<int, 2, torch::RestrictPtrTraits>());
-
-	cudaDeviceSynchronize();
-
-}
-
 void EGTOCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor blockAtomIDs,
 		torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor mbodylist, torch::Tensor gto_components,
 		torch::Tensor gto_powers, torch::Tensor orbital_weights, torch::Tensor gridpoints, torch::Tensor lchannel_weights, torch::Tensor inv_factors, float eta,

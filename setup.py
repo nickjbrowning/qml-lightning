@@ -82,11 +82,38 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
          extra_compile_args={'cxx': optimisation_level_host,
                             'nvcc': optimisation_level_device})
     
-    ext_modules.append(gto_extension)
+    sparse_extension = CUDAExtension(
+        '.cuda.sparse_gpu', [
+            'qml_lightning/cuda/sparse_cuda.cpp',
+            'qml_lightning/cuda/sparse_kernel.cu'
+        ],
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
+    
+    torchscript_SORF = CUDAExtension(
+        '.torchscript_sorf', [
+            'qml_lightning/cuda/torchscript/SORF.cpp',
+            'qml_lightning/cuda/hadamard_kernel.cu'
+        ],
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
+    
+    torchscript_FCHL19 = CUDAExtension(
+        '.torchscript_fchl19', [
+            'qml_lightning/cuda/torchscript/FCHL19.cpp',
+            'qml_lightning/cuda/fchl_cuda_kernel.cu', 'qml_lightning/cuda/pairlist_kernel.cu'
+        ],
+         extra_compile_args={'cxx': optimisation_level_host,
+                            'nvcc': optimisation_level_device})
+    
+    ext_modules.append(torchscript_SORF)
+    ext_modules.append(torchscript_FCHL19)
+    # ext_modules.append(gto_extension)
     ext_modules.append(hd_extension)
     ext_modules.append(pairlist_extension)
     ext_modules.append(fchl_extension)
     ext_modules.append(rff_extension)
+    ext_modules.append(sparse_extension)
     ext_modules.append(utils_extension)
     
 else:
@@ -98,6 +125,7 @@ setup(
     packages=['qml_lightning',
               'qml_lightning.features',
               'qml_lightning.representations',
+              'qml_lightning.torchscript',
               'qml_lightning.models',
               'qml_lightning.utils'],
     version=__version__,
@@ -113,4 +141,4 @@ setup(
     
     ext_package='qml_lightning',
     ext_modules=ext_modules,
-    cmdclass={'build_ext': BuildExtension})
+    cmdclass={'build_ext': BuildExtension.with_options(no_python_abi_suffix=True)})

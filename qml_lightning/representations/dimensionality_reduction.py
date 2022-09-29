@@ -29,7 +29,7 @@ def get_reductors(gto, charges, npcas, species):
 
         choice_input = sub[idx]
     
-        eigvecs, eigvals, vh = torch.linalg.svd(choice_input.T, full_matrices=False, compute_uv=True)
+        eigvecs, eigvals, vh = torch.linalg.svd(choice_input.T, full_matrices=False)
     
         cev = 100 - (torch.sum(eigvals) - torch.sum(eigvals[:npcas])) / torch.sum(eigvals) * 100
     

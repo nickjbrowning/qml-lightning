@@ -4,6 +4,8 @@
 using namespace at;
 using namespace std;
 
+void getElementTypesCUDA(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natoms, torch::Tensor species, torch::Tensor element_types);
+
 void FCHLCuda(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell, torch::Tensor inv_cell,
 		torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours, torch::Tensor Rs2, torch::Tensor Rs3,
 		float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut, torch::Tensor output);
@@ -22,6 +24,34 @@ void FCHLBackwardsCuda(torch::Tensor coordinates, torch::Tensor charges, torch::
 		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
 		torch::Tensor Rs2, torch::Tensor Rs3, float eta2, float eta3, float two_body_decay, float three_body_weight, float three_body_decay, float rcut,
 		torch::Tensor grad_in, torch::Tensor grad_out);
+
+torch::Tensor get_element_types_gpu(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor natom_counts, torch::Tensor species) {
+
+	TORCH_CHECK(coordinates.device().type() == torch::kCUDA, "coordinates must be a CUDA tensor");
+
+	TORCH_CHECK(charges.device().type() == torch::kCUDA, "charges must be a CUDA tensor");
+
+	TORCH_CHECK(species.device().type() == torch::kCUDA, "species must be a CUDA tensor");
+
+	if (coordinates.dim() == 2) {
+		coordinates = coordinates.unsqueeze(0);
+	}
+
+	if (charges.dim() == 1) {
+		charges = charges.unsqueeze(0);
+	}
+
+	int nbatch = coordinates.size(0);
+	int natoms = coordinates.size(1);
+
+	auto options = torch::TensorOptions().dtype(torch::kInt32).layout(torch::kStrided).device(torch::kCUDA);
+
+	torch::Tensor element_types = torch::zeros( { nbatch, natoms }, options);
+
+	getElementTypesCUDA(coordinates, charges, natom_counts, species, element_types);
+
+	return element_types;
+}
 
 torch::Tensor get_fchl_representation(torch::Tensor coordinates, torch::Tensor charges, torch::Tensor species, torch::Tensor element_types, torch::Tensor cell,
 		torch::Tensor inv_cell, torch::Tensor blockAtomIDs, torch::Tensor blockMolIDs, torch::Tensor neighbourlist, torch::Tensor nneighbours,
@@ -173,6 +203,7 @@ std::vector<torch::Tensor> get_fchl_and_derivative(torch::Tensor coordinates, to
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
+	m.def("get_element_types_gpu", &get_element_types_gpu, "computes element types");
 	m.def("get_fchl_representation", &get_fchl_representation, "FCHL19 Representation");
 	m.def("get_fchl_derivative", &get_fchl_derivative, "Grad FCHL19 Representation");
 	m.def("get_fchl_and_derivative", &get_fchl_and_derivative, "FCHL19 Representation and Grad");
