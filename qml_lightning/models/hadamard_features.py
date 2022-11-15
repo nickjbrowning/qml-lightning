@@ -6,7 +6,6 @@ Created on 3 May 2021
 import torch
 import numpy as np
 from tqdm import tqdm
-from qml_lightning.features.SORF import SORFTransformCuda, CosFeatures
 from qml_lightning.cuda.sorf_gpu import compute_hadamard_features, sorf_matrix_gpu, compute_partial_feature_derivatives, compute_molecular_featurization_derivative
 from qml_lightning.models.kernel import BaseKernel
 from qml_lightning.representations.dimensionality_reduction import project_representation
@@ -82,7 +81,15 @@ class HadamardFeaturesModel(BaseKernel, torch.nn.Module):
     
     def forward(self, X, Z, atomIDs, molIDs, atom_counts,
                 cell=torch.empty(0, 3, 3, device=torch.device('cuda')), inv_cell=torch.empty(0, 3, 3, device=torch.device('cuda'))):
-
+        
+        assert X.device == torch.device('cuda:0'), "X tensor must reside on GPU"
+        assert Z.device == torch.device('cuda:0'), "Z tensor must reside on GPU"
+        assert atomIDs.device == torch.device('cuda:0'), "atomIDs tensor must reside on GPU"
+        assert molIDs.device == torch.device('cuda:0'), "molIDs tensor must reside on GPU"
+        assert atom_counts.device == torch.device('cuda:0'), "atom_counts tensor must reside on GPU"
+        assert cell.device == torch.device('cuda:0'), "cell tensor must reside on GPU"
+        assert inv_cell.device == torch.device('cuda:0'), "inv_cell tensor must reside on GPU"
+        
         coeff_normalisation = torch.sqrt(torch.tensor(self.npcas)) / self.sigma
         
         torch_rep = self.rep.forward(X, Z, atomIDs, molIDs, atom_counts, cell, inv_cell)
@@ -115,7 +122,73 @@ class HadamardFeaturesModel(BaseKernel, torch.nn.Module):
          
         return total_energies
     
-    def predict(self, X, Z, max_natoms, cells=None, inv_cells=None, forces=True, print_info=True, profiler=False):
+    def predict_opt(self, coordinates: torch.Tensor, charges: torch.Tensor, atomIDs: torch.Tensor, molIDs: torch.Tensor, natom_counts: torch.Tensor,
+                    cells=torch.empty(0, 3, 3, device='cuda'), inv_cells=torch.empty(0, 3, 3, device='cuda'),
+                    forces=True, print_info=False, profiler=False):
+                
+        '''
+            Barebones prediction method which doesn't require format_data to be called. Also includes profiling and some basic information printing.
+            
+            all inputs must be torch.Tensor residing on the GPU
+            
+
+        '''
+        
+        assert coordinates.device == torch.device('cuda:0'), f"coordinates tensor must reside on GPU"
+        assert charges.device == torch.device('cuda:0'), "charges tensor must reside on GPU"
+        assert atomIDs.device == torch.device('cuda:0'), "atomIDs tensor must reside on GPU"
+        assert molIDs.device == torch.device('cuda:0'), "molIDs tensor must reside on GPU"
+        assert natom_counts.device == torch.device('cuda:0'), "natom_counts tensor must reside on GPU"
+        assert cells.device == torch.device('cuda:0'), "cells tensor must reside on GPU"
+        assert inv_cells.device == torch.device('cuda:0'), "inv_cells tensor must reside on GPU"
+        
+        with torch.autograd.profiler.profile(enabled=profiler, use_cuda=True, with_stack=True) as prof:
+            
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+        
+            start.record()
+
+            if (self.is_trained is False):
+                print ("Error: must train the model first by calling train()!")
+                exit()
+
+            if (forces):
+                coordinates.requires_grad = True
+                
+            total_energies = self.forward(coordinates, charges, atomIDs, molIDs, natom_counts, cells, cells)
+
+            if (forces):
+                forces_torch, = torch.autograd.grad(-total_energies.sum(), coordinates)
+            
+            end.record()
+            torch.cuda.synchronize()
+
+        if (print_info):
+            print("prediction for", coordinates.shape[0], "molecules time: ", start.elapsed_time(end), "ms")
+        
+        if (forces):
+            result = total_energies, forces_torch
+
+        else:
+            result = total_energies
+    
+        if (profiler):
+            result = (result,) + (prof,)
+            
+        return result
+    
+    def predict(self, X, Z, max_natoms, cells=None, inv_cells=None, forces=True, print_info=False, profiler=False):
+        
+        '''
+            max_natoms: maximum number of atoms for any molecule in the batch
+            X: list of numpy coordinate matrices of shape [natoms, 3] * nbatch
+            Z: list of numpy charge vectors of shape  [natoms] * nbatch
+            cells: list of numpy 3x3 matrices of shape [3,3] * nbatch
+            inv_cells:  list of numpy 3x3 matrices of shape [3,3] * nbatch
+            
+            format_data will convert the above to (zero-padded where relevant) torch tensors.
+        '''
         
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
@@ -149,7 +222,7 @@ class HadamardFeaturesModel(BaseKernel, torch.nn.Module):
                 zcells = data['cells']
                 z_invcells = data['inv_cells']
 
-                result = self.predict_opt(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, z_invcells, forces=forces, print_info=True, profiler=False)
+                result = self.predict_opt(coordinates, charges, atomIDs, molIDs, natom_counts, zcells, z_invcells, forces=forces, print_info=print_info, profiler=False)
                 
                 if (forces):
                     predict_energies[i:i + self.nbatch_test] = result[0]
@@ -175,72 +248,9 @@ class HadamardFeaturesModel(BaseKernel, torch.nn.Module):
         else:
             return predict_energies
         
-    def predict_opt(self, coordinates, charges, atomIDs, molIDs, natom_counts, cells=torch.empty(0, 3, 3, device='cuda'), inv_cells=torch.empty(0, 3, 3, device='cuda'),
-                    forces=True, print_info=True, profiler=False):
-        
-        with torch.autograd.profiler.profile(enabled=profiler, use_cuda=True, with_stack=True) as prof:
-            
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
-        
-            start.record()
-            
-            coeff_normalisation = np.sqrt(self.npcas) / self.sigma
-
-            if (self.is_trained is False):
-                print ("Error: must train the model first by calling train()!")
-                exit()
-
-            if (forces):
-                coordinates.requires_grad = True
-      
-            torch_rep = self.rep.forward(coordinates, charges, atomIDs, molIDs, natom_counts, cells, inv_cells)
     
-            Ztest = torch.zeros(coordinates.shape[0], self.nfeatures(), device=torch.device('cuda'), dtype=torch.float32)
-            
-            for e in self.elements:
-                
-                element_idx = self.element2index[e]
-                
-                indexes = charges.int() == e
-                 
-                batch_indexes = torch.where(indexes)[0].type(torch.int)
-                 
-                sub = torch_rep[indexes]
-                
-                if (sub.shape[0] == 0): continue
-                    
-                sub = project_representation(sub, self.reductors[element_idx])
-            
-                coeffs = SORFTransformCuda.apply(sub, self.Dmat[element_idx], coeff_normalisation, self.ntransforms)
-                  
-                coeffs = coeffs.view(coeffs.shape[0], coeffs.shape[1] * coeffs.shape[2])
-                 
-                Ztest += CosFeatures.apply(coeffs, self.bias[element_idx], coordinates.shape[0], batch_indexes)
-   
-            total_energies = torch.matmul(Ztest, self.alpha.float())
-            
-            if (forces):
-                forces_torch, = torch.autograd.grad(-total_energies.sum(), coordinates)
-            
-            end.record()
-            torch.cuda.synchronize()
-
-        if (print_info):
-            print("prediction for", coordinates.shape[0], "molecules time: ", start.elapsed_time(end), "ms")
-        
-        if (forces):
-            result = total_energies, forces_torch
-
-        else:
-            result = total_energies
     
-        if (profiler):
-            result = (result,) + (prof,)
-            
-        return result
-    
-    def save_jit_model(self, file_name='model.pt'):
+    def save_jit_model(self, file_name='model_sorf.pt'):
         script = torch.jit.script(self)
         script.save(file_name)
         

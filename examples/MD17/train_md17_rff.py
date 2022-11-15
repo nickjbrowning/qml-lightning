@@ -22,12 +22,12 @@ if __name__ == "__main__":
     
     parser.add_argument('-rcut', type=float, default=6.0)
     parser.add_argument("-nRs2", type=int, default=24)
-    parser.add_argument("-nRs3", type=int, default=20)
-    parser.add_argument("-eta2", type=float, default=0.32)
-    parser.add_argument("-eta3", type=float, default=2.7)
-    parser.add_argument("-two_body_decay", type=float, default=1.8)
-    parser.add_argument("-three_body_decay", type=float, default=0.57)
-    parser.add_argument("-three_body_weight", type=float, default=13.4)
+    parser.add_argument("-nRs3", type=int, default=22)
+    parser.add_argument("-eta2", type=float, default=0.28)
+    parser.add_argument("-eta3", type=float, default=3.2)
+    parser.add_argument("-two_body_decay", type=float, default=2.3)
+    parser.add_argument("-three_body_decay", type=float, default=0.65)
+    parser.add_argument("-three_body_weight", type=float, default=18.8)
     
     parser.add_argument("-hyperparam_opt", type=int, choices=[0, 1], default=0)
     parser.add_argument("-forces", type=int, choices=[0, 1], default=1)
@@ -102,6 +102,8 @@ if __name__ == "__main__":
                                 nstacks=nstacks, npcas=npcas,
                                 nbatch_train=nbatch_train, nbatch_test=nbatch_test)
     
+    print ("Note: results are in kcal/mol (/A for forces)")
+    
     print ("Calculating projection matrices...")
     model.get_reductors(coords, nuclear_charges, npcas=npcas)
     
@@ -130,4 +132,4 @@ if __name__ == "__main__":
     if (args.forces):
         print("Force MAE /w backwards:", torch.mean(torch.abs(force_predictions - test_forces)))
     
-    # model.save_jit_model()
+    model.save_jit_model()

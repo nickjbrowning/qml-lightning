@@ -11,7 +11,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument("-ntrain", type=int, default=1000)
-    parser.add_argument("-ntest", type=int, default=10000)
+    parser.add_argument("-ntest", type=int, default=1000)
     parser.add_argument("-nbatch_train", type=int, default=64)
     parser.add_argument("-nbatch_test", type=int, default=256)
     
@@ -113,6 +113,8 @@ if __name__ == "__main__":
                                 nstacks=nstacks, ntransforms=ntransforms, npcas=npcas,
                                 nbatch_train=nbatch_train, nbatch_test=nbatch_test)
     
+    print ("Note: results are in kcal/mol (/A for forces)")
+    
     print ("Calculating projection matrices...")
     model.get_reductors(coords, nuclear_charges, npcas=npcas)
     
@@ -130,45 +132,12 @@ if __name__ == "__main__":
     test_energies = data['energies']
     max_natoms = data['natom_counts'].max().item()
     
-    from time import time
-    
     if (args.forces):
         test_forces = data['forces']
         energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
     else:
         energy_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=False)
-    
-    nrepeats = 100
-    
-    tot_time = 0.0
-    for i in range(nrepeats):
-        start = time()
-    
-        energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True, print_info=False)
-        end = time()
-    
-        tot_time += end - start
-    
-    print (tot_time / nrepeats)
-        
-    # total = 0.0
-    # for i in range (50):
-    #     if (args.forces):
-    #         test_forces = data['forces']
-    #         start = time()
-    #         energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
-    #         end = time()
-    #
-    #         total += end - start
-    #     else:
-    #         start = time()
-    #         energy_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=False)
-    #         end = time()
-    #
-    #         total += end - start
-    #
-    # print (total / 50)
-            
+
     print("Energy MAE /w backwards:", torch.mean(torch.abs(energy_predictions - test_energies)))
     
     if (args.forces):

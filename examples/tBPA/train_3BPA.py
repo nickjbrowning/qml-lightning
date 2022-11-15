@@ -140,8 +140,8 @@ if __name__ == "__main__":
 
     energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
 
-    print("Energy MAE /w backwards:", torch.mean(torch.abs(energy_predictions - test_energies)))
-    print("Force MAE /w backwards:", torch.mean(torch.abs(force_predictions - test_forces)))
+    print("Energy MAE:", torch.mean(torch.abs(energy_predictions - test_energies)))
+    print("Force MAE:", torch.mean(torch.abs(force_predictions - test_forces)))
     
-    print("Energy RMSE /w backwards:", torch.sqrt(torch.mean(torch.pow(energy_predictions - test_energies, 2))))
-    print("Force RMSE /w backwards:", torch.sqrt(torch.mean(torch.pow(force_predictions - test_forces, 2))))
+    print("Energy RMSE:", torch.sqrt(torch.mean(torch.pow(energy_predictions - test_energies, 2))))
+    print("Force RMSE:", torch.sqrt(torch.mean(torch.pow(force_predictions - test_forces, 2))))

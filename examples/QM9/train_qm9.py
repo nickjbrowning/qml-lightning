@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("-sigma", type=float, default=6.0)
     parser.add_argument("-llambda", type=float, default=1e-8)
     parser.add_argument("-npcas", type=int, default=128)
-    parser.add_argument("-ntransforms", type=int, default=2)
+    parser.add_argument("-ntransforms", type=int, default=1)
     parser.add_argument("-nstacks", type=int, default=128)
   
     parser.add_argument("-rcut", type=float, default=6.0)
@@ -82,13 +82,15 @@ if __name__ == "__main__":
     test_charges = [nuclear_charges[i] for i in test_indexes]
     test_energies = [energies[i] for i in test_indexes]
 
-    rep = FCHLCuda(species=unique_z, high_cutoff=args.rcut, nRs2=args.nRs2, nRs3=args.nRs3,
+    rep = FCHLCuda(species=unique_z, rcut=args.rcut, nRs2=args.nRs2, nRs3=args.nRs3,
                  eta2=args.eta2, eta3=args.eta3, two_body_decay=args.two_body_decay,
                  three_body_weight=args.three_body_weight, three_body_decay=args.three_body_decay)
     
     model = HadamardFeaturesModel(rep, elements=unique_z, sigma=sigma, llambda=llambda,
                                 nstacks=nstacks, npcas=npcas,
                                 nbatch_train=nbatch_train, nbatch_test=nbatch_test)
+    
+    print ("Note: results are in kcal/mol")
     
     print ("Calculating projection matrices...")
     model.get_reductors(train_coordinates, train_charges, npcas=npcas)
@@ -112,7 +114,7 @@ if __name__ == "__main__":
 
     max_natoms = data['natom_counts'].max().item()
     
-    energy_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=False, use_backward=True)
+    energy_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=False)
 
-    print("Energy MAE /w backwards:", torch.mean(torch.abs(energy_predictions - test_energies)))
+    print("Energy MAE:", torch.mean(torch.abs(energy_predictions - test_energies)))
 
