@@ -36,6 +36,21 @@ The above may also apply if you're using an environment manager, e.g conda/minic
 export PYTHONPATH=/path/to/qml_lightning/build/lib.XXX:$PYTHONPATH
 ```
 
+Finally, QML-Lightning uses the TorchScript C++ API to enable model loading compatibility with the OpenMM-QML-Lightning plugin. All classes rely on a setup script located here:
+
+```
+/qml_lightning/torchscript/setup.py
+```
+
+which loads the compiled QML-Lightning TorchScript libraries for use in other modules. You'll need to set the following environment variable:
+
+```bash
+export QML_LIGHTNING_TORCHSCRIPT_LIB=/path/to/qml_lightning/build/lib.XXX/qml_lightning:$PYTHONPATH
+```
+
+Note that the TorchScript libraries (torchscript_fchl19.sp and torchscript_sorf.so) are located in the main qml_lightning/ folder.
+
+
 Source your .bashrc and you should be good to go!
 
 # Use

@@ -71,6 +71,8 @@ if __name__ == "__main__":
     molIDs = data['molIDs']
     natom_counts = data['natom_counts']
     
+    #Note - the derivatives would likely need to be computed in double precision for the finite difference to be accurate
+    
     rep_deriv_fd = rep.rep_deriv_fd(X, Z, atomIDs, molIDs, natom_counts, dx=0.001)
     
     rep, rep_deriv = rep.get_representation_and_derivative(X, Z, atomIDs, molIDs, natom_counts)

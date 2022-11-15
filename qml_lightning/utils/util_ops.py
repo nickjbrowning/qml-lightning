@@ -12,7 +12,7 @@ def calculate_self_energy(Q, E, elements):
         '''
         computes the per-atom contribution from Q to the property E
         '''
-    
+        
         nmol = len(Q)
         
         natom_counts = torch.zeros(nmol, dtype=torch.int)
@@ -61,10 +61,29 @@ def format_data(X, Q, E=None, F=None, cells=None, inv_cells=None, same_mol=False
         
         also outputs natom counts, atomIDs and molIDs necessary for the CUDA implementation
         
+        same_mol is a more efficient version for lists containing different configurations of the same molecule
+        
         '''
         
         data_dict = {}
         
+        # pad a dimension as this is what the GPU code expects...
+        
+        if (len(X.shape) == 2):
+            X = X[None, ...]
+            
+        if (len(Q.shape) == 1):
+            Q = Q[None, ...]
+            
+        if (F is not None and len(F.shape) == 2):
+            F = F[None, ...]
+            
+        if (cells is not None and len(cells.shape) == 2):
+            cells = cells[None, ...]
+            
+        if (inv_cells is not None and len(inv_cells.shape) == 2):
+            inv_cells = inv_cells[None, ...]
+            
         zbatch = len(X)
         
         natom_counts = torch.zeros(zbatch, dtype=torch.int32, device='cuda')
@@ -100,6 +119,10 @@ def format_data(X, Q, E=None, F=None, cells=None, inv_cells=None, same_mol=False
                 
                 data_dict['cells'] = all_cells
                 data_dict['inv_cells'] = all_inv_cells
+                
+            else:
+                data_dict['cells'] = torch.empty((0, 3, 3), device='cuda')
+                data_dict['inv_cells'] = torch.empty((0, 3, 3), device='cuda')
             
         else:
     
