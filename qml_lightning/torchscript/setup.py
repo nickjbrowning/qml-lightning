@@ -26,6 +26,6 @@ if os.getenv("QML_LIGHTNING_TORCHSCRIPT_LIB") is not None:
         print ("Loading complete.")
     
 else:
-    print("FATAL: Must define QML_LIGHTNING_TORCHSCRIPT_LIB path. Example: export QML_LIGHTNING_TORCHSCRIPT_LIB=/path/to/build/lib.linux-x86_64-3.9/qml_lightning")
+    print("FATAL: Must define QML_LIGHTNING_TORCHSCRIPT_LIB path. Example: export QML_LIGHTNING_TORCHSCRIPT_LIB=/path/to/qml_lightning/build/lib.linux-x86_64-3.9/qml_lightning")
     sys.exit()
     
