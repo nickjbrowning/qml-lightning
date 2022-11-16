@@ -115,13 +115,11 @@ The python wrappers to the CUDA C code fully supports TorchScript, which makes s
 
 ```python
 model.save_jit_model()
-
 ```
 
 which will create a `model.pt` file in the current working directory. This model can then be loaded again using:
 
 ```python
-
 from qml_lightning.torchscript import setup 
 
 loaded = torch.jit.load('model_rff.pt')
