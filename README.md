@@ -72,7 +72,7 @@ python3 train_md17_sorf.py -ntrain 1000 -nstacks 128 -npcas 128 -sigma 2.0 -llam
 
 The total number of features used to approximate the kernel model is given by nstacks x npcas. The variable npcas represents the dimension of the projected FCHL19 representation, and nstacks represents the number of times (i) this lower-dimensional representation is repeated (and multiplied with D_i and transformed via fast HT). The variable npcas must be a multiple of 2, while nstacks can take any number limited by your GPUs VRAM. 
 
-# Development
+# Notes
 
 The code is structured such that all of the CUDA C implementational details are hidden away in the two BaseKernel subclasses: RandomFourrierFeaturesModel and HadamardFeaturesModel. The CUDA C implementation of the FCHL19 representation is wrapped by the FCHLCuda class. Consequently, training models with this code is incredibly straightforward and is performed in a few lines:
 
@@ -108,6 +108,57 @@ train_charges: [ndarray(5), ndarray(11), ndarray(21)]
 train_energies: [-1843.3, -1024.1, -765.4]
 train_forces: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
 ```
+
+# Model Saving/Loading
+
+The python wrappers to the CUDA C code fully supports TorchScript, which makes saving and loading models very straightforward. For both RFF and SORF models, the models can be saved with the following call:
+
+```python
+model.save_jit_model()
+
+```
+
+which will create a `model.pt` file in the current working directory. This model can then be loaded again using:
+
+```python
+
+from qml_lightning.torchscript import setup 
+
+loaded = torch.jit.load('model_rff.pt')
+    
+energy_prediction = loaded.forward(X, Z, atomIDs, molIDs, atom_counts)
+forces_prediction, = torch.autograd.grad(-energy_prediction.sum(), X)
+```
+
+where the setup script has been imported to load the correct QML Lightning torchscript libraries. Note that the `X, Z, atomIDs, molIDs, atom_counts` variables are all pytorch Tensors residing on the GPU. These have the following shapes and types:
+
+```python
+X: [Nbatch, max_atoms, 3], dtype=torch.float32
+Z: [Nbatch, max_atoms], dtype=torch.float32
+molIDs: [total_atoms], dtype=torch.int
+atomIDs: [total_atoms], dtype=torch.int
+atom_counts: [Nbatch], dtype=torch.int
+```
+
+For multiple-molecule inputs to the forward function, `max_atoms` refers to the maximum number of atoms for any molecule in the batch. The elements of the vectors `molIDs` and `atomIDs` provide the indexes to map each atom in the batch to the correct atom within each input molecule. For example, for the two molecules:
+
+``` 
+H    0.0 			0.0 		   0.74
+H    0.0 			0.0 		   0.0
+---
+H    0.7493682    0.0000000    0.4424329
+O    0.0000000    0.0000000   -0.1653507
+H   -0.7493682    0.0000000    0.4424329
+```
+
+the `molIDs` and `atomIDs` vectors should be:
+
+```
+atomIDs = torch.tensor([0, 1, 0, 1, 2], dtype=int, device='cuda')
+molIDs = torch.tensor([0, 0, 1, 1, 1], dtype=int, device='cuda')
+```
+
+For a code example of this, please see the method `format_data` in `qml_lightning/models/kernel.py`.
 
 # Caveats
 
