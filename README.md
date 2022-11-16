@@ -55,19 +55,19 @@ Source your .bashrc and you should be good to go!
 
 # Use
 
-First, download the datasets by typing the following command in the `tests/` folder
+First, download the datasets by typing the following command in the `examples/` folder
 
 ```
 bash get_data.sh
 ```
 
-This will download the MD9 datasets, as well as the QM9 dataset and provide you with the link to the 3BPA dataset. Examples for various datasets are provided in the qml_lightning/tests folder. In this example we'll use the MD17 dataset with Hadamard features located here: `tests/MD17/train_md17.py`
+This will download the MD9 datasets, as well as the QM9 dataset and provide you with the link to the 3BPA dataset. Examples for various datasets are provided in the qml_lightning/examples folder. In this example we'll use the MD17 dataset with Hadamard features located here: `examples/MD17/train_md17_sorf.py`
 
 
 now run the following command to do some ML, learning only energies + forces:
 
 ```python
-python3 train_md17.py -ntrain 1000 -nstacks 128 -npcas 128 -sigma 2.0 -llambda 1e-5
+python3 train_md17_sorf.py -ntrain 1000 -nstacks 128 -npcas 128 -sigma 2.0 -llambda 1e-5
 ```
 
 The total number of features used to approximate the kernel model is given by nstacks x npcas. The variable npcas represents the dimension of the projected FCHL19 representation, and nstacks represents the number of times (i) this lower-dimensional representation is repeated (and multiplied with D_i and transformed via fast HT). The variable npcas must be a multiple of 2, while nstacks can take any number limited by your GPUs VRAM. 
@@ -77,7 +77,7 @@ The total number of features used to approximate the kernel model is given by ns
 The code is structured such that all of the CUDA C implementational details are hidden away in the two BaseKernel subclasses: RandomFourrierFeaturesModel and HadamardFeaturesModel. The CUDA C implementation of the FCHL19 representation is wrapped by the FCHLCuda class. Consequently, training models with this code is incredibly straightforward and is performed in a few lines:
 
 ```python
-rep = FCHLCuda(species=unique_z, high_cutoff=rcut, nRs2=nRs2, nRs3=nRs3, eta2=eta2, eta3=eta3,
+rep = FCHLCuda(species=unique_z, rcut=rcut, nRs2=nRs2, nRs3=nRs3, eta2=eta2, eta3=eta3,
                    two_body_decay=two_body_decay, three_body_decay=three_body_decay, three_body_weight=three_body_weight)
     
 model = HadamardFeaturesModel(rep, elements=unique_z, sigma=sigma, llambda=llambda,
@@ -97,7 +97,7 @@ test_energies = data['energies']
 test_forces = data['forces']
 max_natoms = data['natom_counts'].max().item()
 
-energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True, use_backward=True)
+energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
 ```
 
 The BaseKernel subclasses expect python lists of numpy ndarrays containing the relevant input data. These are then converted to torch CUDA tensors internally by the format_data method. Note that this method uses zero padding when relevant for datasets containing molecules with different sizes. In the above example, the train_coordinates, train_energies and train_forces python lists might have the following structure:
@@ -105,7 +105,7 @@ The BaseKernel subclasses expect python lists of numpy ndarrays containing the r
 ```
 train_coordinates: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
 train_charges: [ndarray(5), ndarray(11), ndarray(21)]
-train_energies: [-1843, -1024, -765]
+train_energies: [-1843.3, -1024.1, -765.4]
 train_forces: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
 ```
 
