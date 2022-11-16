@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 import argparse
-from qml_lightning.models.hadamard_features import HadamardFeaturesModel
+from qml_lightning.torchscript import setup # called to load torchscript libs from QML_LIGHTNING_TORCHSCRIPT_LIB
 
 if __name__ == "__main__":
     
@@ -90,11 +90,12 @@ if __name__ == "__main__":
     atomIDs = torch.arange(coordinates.shape[0], dtype=torch.int).cuda()
     atom_counts = torch.zeros(1).fill_(coordinates.shape[0]).int().cuda()
     
-    loaded = torch.jit.load('model_sorf.pt')
+    loaded = torch.jit.load('saved_models/model_sorf.pt')
     
     energy_prediction = loaded.forward(X, Z, atomIDs, molIDs, atom_counts)
     
     forces_prediction, = torch.autograd.grad(-energy_prediction.sum(), X)
+
     
     assert np.isclose(ref_energy,  loaded.self_energy[Z.long()].sum() + energy_prediction.cpu().item()), "predicted energy is not close to ref_energy"
     assert np.isclose(ref_forces,  forces_prediction.cpu().squeeze(0).numpy(), rtol=1e-4, atol=1e-4).all(), "predicted forces is not close to ref_forces"
