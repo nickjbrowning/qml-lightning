@@ -72,43 +72,6 @@ python3 train_md17_sorf.py -ntrain 1000 -nstacks 128 -npcas 128 -sigma 2.0 -llam
 
 The total number of features used to approximate the kernel model is given by nstacks x npcas. The variable npcas represents the dimension of the projected FCHL19 representation, and nstacks represents the number of times (i) this lower-dimensional representation is repeated (and multiplied with D_i and transformed via fast HT). The variable npcas must be a multiple of 2, while nstacks can take any number limited by your GPUs VRAM. 
 
-# Notes
-
-The code is structured such that all of the CUDA C implementational details are hidden away in the two BaseKernel subclasses: RandomFourrierFeaturesModel and HadamardFeaturesModel. The CUDA C implementation of the FCHL19 representation is wrapped by the FCHLCuda class. Consequently, training models with this code is incredibly straightforward and is performed in a few lines:
-
-```python
-rep = FCHLCuda(species=unique_z, rcut=rcut, nRs2=nRs2, nRs3=nRs3, eta2=eta2, eta3=eta3,
-                   two_body_decay=two_body_decay, three_body_decay=three_body_decay, three_body_weight=three_body_weight)
-    
-model = HadamardFeaturesModel(rep, elements=unique_z, sigma=sigma, llambda=llambda,
-                                nstacks=nstacks, ntransforms=ntransforms, npcas=npcas,
-                                nbatch_train=nbatch_train, nbatch_test=nbatch_test)
-    
-model.get_reductors(train_coordinates, train_charges, npcas=npcas)
-    
-model.set_subtract_self_energies(True)
-model.self_energy = torch.Tensor([0., -13.587222780835477, 0., 0., 0., 0., -1029.4889999855063, -1484.9814568572233, -2041.9816003861047]).double()
-  
-model.train(train_coordinates, train_charges, train_energies, train_forces)
-    
-data = model.format_data(test_coordinates, test_charges, test_energies, test_forces)
-
-test_energies = data['energies']
-test_forces = data['forces']
-max_natoms = data['natom_counts'].max().item()
-
-energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
-```
-
-The BaseKernel subclasses expect python lists of numpy ndarrays containing the relevant input data. These are then converted to torch CUDA tensors internally by the format_data method. Note that this method uses zero padding when relevant for datasets containing molecules with different sizes. In the above example, the train_coordinates, train_energies and train_forces python lists might have the following structure:
-
-```
-train_coordinates: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
-train_charges: [ndarray(5), ndarray(11), ndarray(21)]
-train_energies: [-1843.3, -1024.1, -765.4]
-train_forces: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
-```
-
 # Model Saving/Loading
 
 The python wrappers to the CUDA C code fully supports TorchScript, which makes saving and loading models very straightforward. For both RFF and SORF models, the models can be saved with the following call:
@@ -157,6 +120,44 @@ molIDs = torch.tensor([0, 0, 1, 1, 1], dtype=int, device='cuda')
 ```
 
 For a code example of this, please see the method `format_data` in `qml_lightning/models/kernel.py`.
+
+
+# Notes
+
+The code is structured such that all of the CUDA C implementational details are hidden away in the two BaseKernel subclasses: RandomFourrierFeaturesModel and HadamardFeaturesModel. The CUDA C implementation of the FCHL19 representation is wrapped by the FCHLCuda class. Consequently, training models with this code is incredibly straightforward and is performed in a few lines:
+
+```python
+rep = FCHLCuda(species=unique_z, rcut=rcut, nRs2=nRs2, nRs3=nRs3, eta2=eta2, eta3=eta3,
+                   two_body_decay=two_body_decay, three_body_decay=three_body_decay, three_body_weight=three_body_weight)
+    
+model = HadamardFeaturesModel(rep, elements=unique_z, sigma=sigma, llambda=llambda,
+                                nstacks=nstacks, ntransforms=ntransforms, npcas=npcas,
+                                nbatch_train=nbatch_train, nbatch_test=nbatch_test)
+    
+model.get_reductors(train_coordinates, train_charges, npcas=npcas)
+    
+model.set_subtract_self_energies(True)
+model.self_energy = torch.Tensor([0., -13.587222780835477, 0., 0., 0., 0., -1029.4889999855063, -1484.9814568572233, -2041.9816003861047]).double()
+  
+model.train(train_coordinates, train_charges, train_energies, train_forces)
+    
+data = model.format_data(test_coordinates, test_charges, test_energies, test_forces)
+
+test_energies = data['energies']
+test_forces = data['forces']
+max_natoms = data['natom_counts'].max().item()
+
+energy_predictions, force_predictions = model.predict(test_coordinates, test_charges, max_natoms, forces=True)
+```
+
+The BaseKernel subclasses expect python lists of numpy ndarrays containing the relevant input data. These are then converted to torch CUDA tensors internally by the format_data method. This method is not optimised and should not be used for timing benchmarks. Note that this method uses zero padding when relevant for datasets containing molecules with different sizes. In the above example, the train_coordinates, train_energies and train_forces python lists might have the following structure:
+
+```
+train_coordinates: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
+train_charges: [ndarray(5), ndarray(11), ndarray(21)]
+train_energies: [-1843.3, -1024.1, -765.4]
+train_forces: [ndarray(5, 3), ndarray(11,3), ndarray(21,3)...]
+```
 
 # Caveats
 
