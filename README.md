@@ -155,25 +155,24 @@ model.calculate_self_energy(train_charges, train_energies)
 Please cite the following archive if you use or derive from this work.
 
 ```
-https://arxiv.org/abs/2206.01580
+https://pubs.aip.org/aip/jcp/article/157/21/214801/2842352/GPU-accelerated-approximate-kernel-method-for
 ```
 
 ```
-@misc{https://doi.org/10.48550/arxiv.2206.01580,
-  doi = {10.48550/ARXIV.2206.01580},
-  
-  url = {https://arxiv.org/abs/2206.01580},
-  
-  author = {Browning, Nicholas J. and Faber, Felix A. and von Lilienfeld, O. Anatole},
-  
-  keywords = {Chemical Physics (physics.chem-ph), FOS: Physical sciences, FOS: Physical sciences},
-  
-  title = {GPU-Accelerated Approximate Kernel Method for Quantum Machine Learning},
-  
-  publisher = {arXiv},
-  
-  year = {2022},
-  
-  copyright = {Creative Commons Attribution 4.0 International}
+@article{10.1063/5.0108967,
+    author = {Browning, Nicholas J. and Faber, Felix A. and Anatole von Lilienfeld, O.},
+    title = "{GPU-accelerated approximate kernel method for quantum machine learning}",
+    journal = {The Journal of Chemical Physics},
+    volume = {157},
+    number = {21},
+    pages = {214801},
+    year = {2022},
+    month = {12},
+    abstract = "{We introduce Quantum Machine Learning (QML)-Lightning, a PyTorch package containing graphics processing unit (GPU)-accelerated approximate kernel models, which can yield trained models within seconds. QML-Lightning includes a cost-efficient GPU implementation of FCHL19, which together can provide energy and force predictions with competitive accuracy on a microsecond per atom timescale. Using modern GPU hardware, we report learning curves of energies and forces as well as timings as numerical evidence for select legacy benchmarks from atomistic simulation including QM9, MD-17, and 3BPA.}",
+    issn = {0021-9606},
+    doi = {10.1063/5.0108967},
+    url = {https://doi.org/10.1063/5.0108967},
+    eprint = {https://pubs.aip.org/aip/jcp/article-pdf/doi/10.1063/5.0108967/16556003/214801\_1\_online.pdf},
 }
+
 ```
