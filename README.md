@@ -152,7 +152,7 @@ model.calculate_self_energy(train_charges, train_energies)
 
 # Citation
 
-Please cite the following archive if you use or derive from this work.
+Please cite the following paper if you use or derive from this work.
 
 https://pubs.aip.org/aip/jcp/article/157/21/214801/2842352/GPU-accelerated-approximate-kernel-method-for
 
