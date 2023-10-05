@@ -72,7 +72,7 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     
-    data = np.load(args.path)
+    data = np.load(args.path, allow_pickle=True)
     
     if ('R' in data.keys()):
         coords = data['R']

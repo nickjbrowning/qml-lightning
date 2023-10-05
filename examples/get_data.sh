@@ -1,5 +1,5 @@
 MD17_files_out=(benzene_dft.npz uracil_dft.npz naphthalene_dft.npz salicylic_dft.npz malonaldehyde_dft.npz ethanol_dft.npz toluene_dft.npz aspirin_dft.npz)
-MD17_files_in=(benzene2017_dft.npz uracil_dft.npz naphthalene_dft.npz salicylic_dft.npz malonaldehyde_dft.npz ethanol_dft.npz toluene_dft.npz aspirin_dft.npz)
+MD17_files_in=(md17_benzene2017.npz md17_uracil.npz md17_naphthalene.npz md17_salicylic.npz md17_malonaldehyde.npz md17_ethanol.npz md17_toluene.npz md17_aspirin.npz)
 
 mkdir -p data
 
@@ -21,7 +21,7 @@ fi
 
 echo "---ACS doesn't like wget - download the 3BPA zipfile from the paper ---"
 
-xdg-open  https://pubs.acs.org/doi/suppl/10.1021/acs.jctc.1c00647/
+echo "https://pubs.acs.org/doi/suppl/10.1021/acs.jctc.1c00647/"
 
 if [[ ! -d data/3BPA ]]; then
   mkdir data/3BPA

@@ -9,7 +9,7 @@ import numpy as np
 from qml_lightning.representations.dimensionality_reduction import project_representation, project_derivative
 from tqdm import tqdm
 from qml_lightning.cuda.utils_gpu import matmul_and_reduce
-from qml_lightning.torchscript import setup
+#from qml_lightning.torchscript import setup
 
 
 class BaseKernel():
