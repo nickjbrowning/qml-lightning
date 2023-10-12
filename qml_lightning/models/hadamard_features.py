@@ -156,7 +156,7 @@ class HadamardFeaturesModel(BaseKernel, torch.nn.Module):
             if (forces):
                 coordinates.requires_grad = True
                 
-            total_energies = self.forward(coordinates, charges, atomIDs, molIDs, natom_counts, cells, cells)
+            total_energies = self.forward(coordinates, charges, atomIDs, molIDs, natom_counts, cells, inv_cells)
 
             if (forces):
                 forces_torch, = torch.autograd.grad(-total_energies.sum(), coordinates)

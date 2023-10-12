@@ -1,0 +1,9 @@
+Metadata-Version: 2.1
+Name: qmlightning
+Version: 0.1
+Summary: GPU-Accelerated Kernel Methods for Quantum Machine Learning
+Home-page: TODO
+Author: Nicholas J. Browning
+Author-email: nickjbrowning@gmail.com
+Keywords: Machine Learning,Quantum Chemistry
+Platform: Any
